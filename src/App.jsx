@@ -4,7 +4,7 @@ import {
   LogOut, Plus, Search, FileText, User, Home, DownloadCloud,
   Trash2, Filter, Layers, ClipboardPaste, AlertCircle, ArrowUpDown, 
   Calendar, Clock, X, Settings, Camera, Cloud, CloudOff, RefreshCw,
-  Moon, Sun, FolderOpen, Award, Save, ClipboardCheck, Bell, ExternalLink, Image as ImageIcon, Link2, Edit
+  Moon, Sun, FolderOpen, Award, Save, ClipboardCheck, Bell, ExternalLink, Image as ImageIcon, Link2, Edit, Menu
 } from 'lucide-react';
 
 // --- Safe Storage Wrapper ---
@@ -43,18 +43,21 @@ const resizeImage = (file) => {
   });
 };
 
-function ConfirmModal({ isOpen, title, message, onConfirm, onCancel, isDark }) {
+// --- Custom Confirm Modal Component ---
+function ConfirmModal({ isOpen, title, message, onConfirm, onCancel, theme }) {
   if (!isOpen) return null;
+  const isDark = theme === 'dark';
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in">
-        <div className={`p-6 rounded-3xl shadow-2xl max-w-sm w-full border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}>
-            <h3 className="text-xl font-black mb-2 flex items-center"><AlertCircle className="mr-2 text-red-500" size={24} /> {title || 'ยืนยันการลบ'}</h3>
-            <p className={`text-sm mb-6 font-bold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{message || 'คุณแน่ใจหรือไม่ที่จะลบข้อมูลนี้?'}</p>
-            <div className="flex justify-end gap-3">
-                <button type="button" onClick={onCancel} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>ยกเลิก</button>
-                <button type="button" onClick={onConfirm} className="px-5 py-2.5 rounded-xl font-bold bg-red-500 text-white hover:bg-red-600 shadow-md transition-colors">ยืนยันการลบ</button>
-            </div>
+    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in">
+      <div className={`rounded-3xl w-full max-w-sm p-6 shadow-2xl relative border text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <AlertCircle className="mx-auto text-red-500 mb-4" size={48} />
+        <h3 className="text-xl font-black mb-2">{title}</h3>
+        <p className={`text-sm font-bold mb-6 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{message}</p>
+        <div className="flex gap-3">
+          <button onClick={onCancel} className={`flex-1 py-3 rounded-xl font-bold transition-all ${isDark ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>ยกเลิก</button>
+          <button onClick={onConfirm} className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold shadow-md">ยืนยันการลบ</button>
         </div>
+      </div>
     </div>
   );
 }
@@ -63,6 +66,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [theme, setTheme] = useState(() => safeGetItem('kasem_theme') || 'light');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   const [students, setStudents] = useState([]);
   const [subjects, setSubjects] = useState([]);
@@ -138,20 +142,30 @@ export default function App() {
   }, [dbUrl]);
 
   const saveState = async (updates) => {
-    if (updates.students) setStudents(updates.students); if (updates.subjects) setSubjects(updates.subjects);
-    if (updates.enrollments) setEnrollments(updates.enrollments); if (updates.assignments) setAssignments(updates.assignments);
-    if (updates.submissions) setSubmissions(updates.submissions); if (updates.attendance) setAttendance(updates.attendance);
-    if (updates.exams) setExams(updates.exams); if (updates.behaviors) setBehaviors(updates.behaviors);
-    if (updates.materials) setMaterials(updates.materials); if (updates.announcements) setAnnouncements(updates.announcements);
+    if (updates.students) setStudents(updates.students); 
+    if (updates.subjects) setSubjects(updates.subjects);
+    if (updates.enrollments) setEnrollments(updates.enrollments); 
+    if (updates.assignments) setAssignments(updates.assignments);
+    if (updates.submissions) setSubmissions(updates.submissions); 
+    if (updates.attendance) setAttendance(updates.attendance);
+    if (updates.exams) setExams(updates.exams); 
+    if (updates.behaviors) setBehaviors(updates.behaviors);
+    if (updates.materials) setMaterials(updates.materials); 
+    if (updates.announcements) setAnnouncements(updates.announcements);
     if (updates.teacherProfile) setTeacherProfile(updates.teacherProfile);
 
+    // Ensure GAS doesn't drop columns by strictly formatting the payload
+    const finalSubjects = (updates.subjects || subjects).map(s => ({
+        id: s.id || '', code: s.code || '', name: s.name || '', semester: s.semester || '1', year: s.year || '',
+        midtermMax: s.midtermMax !== undefined && s.midtermMax !== null ? s.midtermMax : 20,
+        finalMax: s.finalMax !== undefined && s.finalMax !== null ? s.finalMax : 30
+    }));
+
     const payload = {
-      students: updates.students || students, subjects: updates.subjects || subjects,
-      enrollments: updates.enrollments || enrollments, assignments: updates.assignments || assignments,
-      submissions: updates.submissions || submissions, attendance: updates.attendance || attendance,
-      exams: updates.exams || exams, behaviors: updates.behaviors || behaviors,
-      materials: updates.materials || materials, announcements: updates.announcements || announcements,
-      teacherProfile: updates.teacherProfile || teacherProfile
+      students: updates.students || students, subjects: finalSubjects, enrollments: updates.enrollments || enrollments, 
+      assignments: updates.assignments || assignments, submissions: updates.submissions || submissions, 
+      attendance: updates.attendance || attendance, exams: updates.exams || exams, behaviors: updates.behaviors || behaviors,
+      materials: updates.materials || materials, announcements: updates.announcements || announcements, teacherProfile: updates.teacherProfile || teacherProfile
     };
 
     safeSetItem('kasem_local_data', JSON.stringify(payload));
@@ -159,11 +173,7 @@ export default function App() {
     if (dbUrl) {
       setSyncStatus('syncing');
       try {
-        await fetch(dbUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'sync', data: JSON.stringify(payload) })
-        });
+        await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'sync', data: JSON.stringify(payload) }) });
         setSyncStatus('success'); setTimeout(() => setSyncStatus('idle'), 2000);
       } catch (e) { setSyncStatus('error'); }
     }
@@ -213,19 +223,32 @@ export default function App() {
     announcements, setAnnouncements: (data) => saveState({announcements: data}),
     teacherProfile, setTeacherProfile: (data) => saveState({teacherProfile: data}),
     dbUrl, setDbUrl: (url) => { setDbUrl(url); safeSetItem('kasem_db_url', url); },
-    getUniqueRooms, showToast, setActiveTab, theme, setTheme 
+    getUniqueRooms, showToast, setActiveTab, theme, setTheme, saveState 
   };
 
   return (
     <div className={`min-h-screen font-sans flex flex-col md:flex-row transition-colors duration-300 ${theme === 'dark' ? 'dark bg-slate-900 text-slate-200' : 'bg-slate-50 text-slate-800'}`}>
       {toastMessage && (
-        <div className="fixed top-6 right-6 z-50 bg-blue-600 text-white px-6 py-4 rounded-xl shadow-xl flex items-center animate-in slide-in-from-right-4 font-bold">
+        <div className="fixed top-6 right-6 z-[200] bg-blue-600 text-white px-6 py-4 rounded-xl shadow-xl flex items-center animate-in slide-in-from-right-4 font-bold">
           <AlertCircle className="mr-3 shrink-0" /> <span className="leading-tight">{toastMessage}</span>
         </div>
       )}
-      <Sidebar currentUser={liveUser} activeTab={activeTab} setActiveTab={setActiveTab} onLogout={() => setCurrentUser(null)} theme={theme} />
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        <TopNav currentUser={liveUser} syncStatus={syncStatus} dbUrl={dbUrl} theme={theme} />
+      
+      <Sidebar 
+        currentUser={liveUser} 
+        activeTab={activeTab} 
+        setActiveTab={(tab) => { setActiveTab(tab); setIsMobileMenuOpen(false); }} 
+        onLogout={() => {
+           setCurrentUser(null);
+           safeSetItem('kasem_creds', null);
+        }} 
+        theme={theme} 
+        isOpen={isMobileMenuOpen} 
+        setIsOpen={setIsMobileMenuOpen} 
+      />
+
+      <div className="flex-1 flex flex-col h-screen overflow-hidden w-full relative">
+        <TopNav currentUser={liveUser} syncStatus={syncStatus} dbUrl={dbUrl} theme={theme} setIsMobileMenuOpen={setIsMobileMenuOpen} />
         <main className={`flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 custom-scrollbar ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-50'}`}>
           {liveUser.role === 'teacher' ? <TeacherView activeTab={activeTab} {...commonProps} /> : <StudentView activeTab={activeTab} student={liveUser.data} {...commonProps} />}
         </main>
@@ -238,17 +261,50 @@ function LoginView({ onLogin, students, teacherProfile, theme, showToast }) {
   const [role, setRole] = useState('student');
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
+  const [loginError, setLoginError] = useState('');
   const isDark = theme === 'dark';
+
+  useEffect(() => {
+    const savedCreds = safeGetItem('kasem_creds');
+    if (savedCreds) {
+      try {
+        const creds = JSON.parse(savedCreds);
+        if (creds.role) setRole(creds.role);
+        if (creds.id) setStudentId(creds.id);
+        if (creds.password) setPassword(creds.password);
+        setRememberMe(true);
+      } catch (e) {
+        safeSetItem('kasem_creds', null);
+      }
+    }
+  }, []);
 
   const handleLogin = (e) => {
     e.preventDefault();
+    setLoginError('');
+
     if (role === 'teacher') {
-      if (password === teacherProfile.password || password === 'admin') onLogin({ role: 'teacher', data: teacherProfile });
-      else showToast('รหัสผ่านแอดมิน/ครูผู้สอนไม่ถูกต้อง');
+      const adminPwd = teacherProfile.password ? String(teacherProfile.password) : 'admin';
+      
+      if (password === adminPwd) {
+        if (rememberMe) safeSetItem('kasem_creds', JSON.stringify({ role: 'teacher', password }));
+        else safeSetItem('kasem_creds', null);
+        onLogin({ role: 'teacher', data: teacherProfile });
+      } else {
+        setLoginError('รหัสผ่านแอดมิน/ครูผู้สอนไม่ถูกต้อง');
+      }
     } else {
       const student = students.find(s => String(s.id).trim() === studentId.trim());
-      if (student && String(student.password) === password) onLogin({ role: 'student', data: student });
-      else showToast('รหัสนักเรียนหรือรหัสผ่านไม่ถูกต้อง');
+      const stuPwd = student?.password ? String(student.password) : '12345678';
+      
+      if (student && password === stuPwd) {
+        if (rememberMe) safeSetItem('kasem_creds', JSON.stringify({ role: 'student', id: studentId, password }));
+        else safeSetItem('kasem_creds', null);
+        onLogin({ role: 'student', data: student });
+      } else {
+        setLoginError('รหัสนักเรียนหรือรหัสผ่านไม่ถูกต้อง');
+      }
     }
   };
 
@@ -256,37 +312,51 @@ function LoginView({ onLogin, students, teacherProfile, theme, showToast }) {
     <div className={`min-h-screen flex items-center justify-center p-4 transition-colors ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-blue-50 to-indigo-100'}`}>
       <div className={`max-w-md w-full rounded-3xl p-8 shadow-2xl ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200'}`}>
         <div className="text-center mb-8">
-          <img src="https://img1.pic.in.th/images/ChatGPT-Image-26-..-2569-13_15_38.png" alt="Logo" className="h-36 md:h-40 mx-auto mb-4 object-contain drop-shadow-sm" />
+          <img src="https://img1.pic.in.th/images/ChatGPT-Image-26-..-2569-13_15_38.png" alt="Logo" className="h-36 md:h-40 mx-auto mb-4 object-contain drop-shadow-md" />
           <h1 className={`text-3xl font-black tracking-tight ${isDark ? 'text-white' : 'text-blue-900'}`}>Kasem One</h1>
           <p className="text-blue-500 font-bold text-sm mt-1">Platform for Teaching & Learning</p>
         </div>
 
+        {loginError && (
+          <div className="mb-6 bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-3 rounded-xl font-bold flex items-center animate-in fade-in zoom-in-95">
+            <AlertCircle size={18} className="mr-2 shrink-0"/> {loginError}
+          </div>
+        )}
+
         <form onSubmit={handleLogin} className="space-y-6">
           <div className={`flex rounded-xl p-1.5 ${isDark ? 'bg-slate-900' : 'bg-slate-100'}`}>
-            <button type="button" onClick={() => setRole('student')} className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${role === 'student' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-600 shadow-sm') : 'text-slate-500'}`}>นักเรียน</button>
-            <button type="button" onClick={() => setRole('teacher')} className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${role === 'teacher' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-600 shadow-sm') : 'text-slate-500'}`}>แอดมิน / ครู</button>
+            <button type="button" onClick={() => {setRole('student'); setLoginError('');}} className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${role === 'student' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-600 shadow-sm') : 'text-slate-500'}`}>นักเรียน</button>
+            <button type="button" onClick={() => {setRole('teacher'); setLoginError('');}} className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${role === 'teacher' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-600 shadow-sm') : 'text-slate-500'}`}>แอดมิน / ครู</button>
           </div>
           
           {role === 'student' ? (
             <div className="space-y-4">
-              <div><label className={`block text-sm font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>รหัสประจำตัวนักเรียน</label><input required type="text" value={studentId} onChange={e=>setStudentId(e.target.value)} className={`w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} placeholder="เช่น 1001"/></div>
-              <div><label className={`block text-sm font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>รหัสผ่าน</label><input required type="password" value={password} onChange={e=>setPassword(e.target.value)} className={`w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} placeholder="รหัสผ่านเริ่มต้น (เช่น 12345678)"/></div>
+              <div><label className={`block text-sm font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>รหัสประจำตัวนักเรียน</label><input required type="text" value={studentId} onChange={e=>{setStudentId(e.target.value); setLoginError('');}} className={`w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} placeholder="เช่น 1001"/></div>
+              <div><label className={`block text-sm font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>รหัสผ่าน</label><input required type="password" value={password} onChange={e=>{setPassword(e.target.value); setLoginError('');}} className={`w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} placeholder="รหัสผ่านเริ่มต้น (เช่น 12345678)"/></div>
             </div>
           ) : (
-            <div><label className={`block text-sm font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>รหัสผ่านแอดมิน</label><input required type="password" value={password} onChange={e=>setPassword(e.target.value)} className={`w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} placeholder="รหัสผ่าน (admin)"/></div>
+            <div><label className={`block text-sm font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>รหัสผ่านแอดมิน</label><input required type="password" value={password} onChange={e=>{setPassword(e.target.value); setLoginError('');}} className={`w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} placeholder="รหัสผ่าน (admin)"/></div>
           )}
+
+          <div className="flex items-center mt-2">
+            <label className="flex items-center cursor-pointer text-sm font-bold text-slate-500 select-none">
+              <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 mr-2" />
+              จดจำรหัสผ่านไว้ในเครื่องนี้
+            </label>
+          </div>
+
           <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg transition-all">เข้าสู่ระบบ</button>
         </form>
 
         <div className="mt-8 pt-4 border-t border-slate-200 dark:border-slate-700 text-center text-[11px] font-bold text-slate-400 dark:text-slate-500 tracking-wide">
-          พัฒนาโดย นายเกษม พิมพ์เงิน ครูโรงเรียนสระบุรีวิทยาคม
+           พัฒนาโดย นายเกษม พิมพ์เงิน ครูโรงเรียนสระบุรีวิทยาคม
         </div>
       </div>
     </div>
   );
 }
 
-function Sidebar({ currentUser, activeTab, setActiveTab, onLogout, theme }) {
+function Sidebar({ currentUser, activeTab, setActiveTab, onLogout, theme, isOpen, setIsOpen }) {
   const isDark = theme === 'dark';
   const teacherNav = [
     { id: 'dashboard', icon: <Home size={18} />, label: 'ภาพรวมระบบ' },
@@ -317,38 +387,49 @@ function Sidebar({ currentUser, activeTab, setActiveTab, onLogout, theme }) {
   const navs = currentUser.role === 'teacher' ? teacherNav : studentNav;
 
   return (
-    <div className={`w-full md:w-64 flex flex-col shrink-0 overflow-y-auto shadow-sm z-20 ${isDark ? 'bg-slate-800 border-r border-slate-700' : 'bg-white border-r border-slate-200'}`}>
-      <div className={`py-6 flex flex-col items-center justify-center shrink-0 border-b ${isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-blue-50/50'}`}>
-        <div className="flex flex-col items-center text-center">
-          <img src="https://img1.pic.in.th/images/ChatGPT-Image-26-..-2569-13_15_38.png" alt="Logo" className="h-16 md:h-20 mb-3 object-contain drop-shadow-sm" />
-          <span className={`text-xl font-black ${isDark ? 'text-white' : 'text-blue-900'}`}>Kasem One</span>
-        </div>
-      </div>
-      <nav className="flex-1 p-3 space-y-1 overflow-y-auto custom-scrollbar">
-        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 mt-1 px-3">เมนูหลัก</div>
-        {navs.map(nav => (
-          <button key={nav.id} onClick={() => setActiveTab(nav.id)} className={`w-full flex items-center px-4 py-3 rounded-xl transition-all font-bold text-sm ${activeTab === nav.id ? (isDark ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-700 shadow-sm border border-blue-100') : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-50')}`}>
-            {nav.icon}<span className="ml-3">{nav.label}</span>
-          </button>
-        ))}
-      </nav>
-      <div className={`p-4 shrink-0 border-t flex flex-col gap-3 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-        <button onClick={onLogout} className={`flex items-center w-full px-4 py-2 rounded-xl font-bold transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-500 hover:text-red-600 hover:bg-red-50'}`}>
-          <LogOut size={18} className="mr-3" /> ออกจากระบบ
+    <>
+      {isOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsOpen(false)}></div>
+      )}
+      <div className={`fixed inset-y-0 left-0 z-50 w-64 flex flex-col shrink-0 shadow-2xl md:shadow-none transform transition-transform duration-300 md:relative md:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'} ${isDark ? 'bg-slate-800 border-r border-slate-700' : 'bg-white border-r border-slate-200'}`}>
+        <button onClick={() => setIsOpen(false)} className="md:hidden absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
+          <X size={20}/>
         </button>
-        <div className={`text-center text-[9px] font-bold leading-relaxed ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-          พัฒนาโดย นายเกษม พิมพ์เงิน<br/>ครูโรงเรียนสระบุรีวิทยาคม
+        <div className={`py-6 flex flex-col items-center justify-center shrink-0 border-b ${isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-blue-50/50'}`}>
+          <div className="flex flex-col items-center text-center">
+            <img src="https://img1.pic.in.th/images/ChatGPT-Image-26-..-2569-13_15_38.png" alt="Logo" className="h-20 mb-3 object-contain drop-shadow-sm" />
+            <span className={`text-xl font-black ${isDark ? 'text-white' : 'text-blue-900'}`}>Kasem One</span>
+          </div>
+        </div>
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto custom-scrollbar">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 mt-1 px-3">เมนูหลัก</div>
+          {navs.map(nav => (
+            <button key={nav.id} onClick={() => setActiveTab(nav.id)} className={`w-full flex items-center px-4 py-3 rounded-xl transition-all font-bold text-sm ${activeTab === nav.id ? (isDark ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-700 shadow-sm border border-blue-100') : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-50')}`}>
+              {nav.icon}<span className="ml-3">{nav.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className={`p-4 shrink-0 border-t flex flex-col gap-3 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <button onClick={onLogout} className={`flex items-center w-full px-4 py-2 rounded-xl font-bold transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-500 hover:text-red-600 hover:bg-red-50'}`}>
+            <LogOut size={18} className="mr-3" /> ออกจากระบบ
+          </button>
+          <div className={`text-center text-[9px] font-bold leading-relaxed ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            พัฒนาโดย นายเกษม พิมพ์เงิน<br/>ครูโรงเรียนสระบุรีวิทยาคม
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
-function TopNav({ currentUser, syncStatus, dbUrl, theme }) {
+function TopNav({ currentUser, syncStatus, dbUrl, theme, setIsMobileMenuOpen }) {
   const isDark = theme === 'dark';
   return (
     <header className={`h-16 md:h-20 backdrop-blur-md flex items-center justify-between px-4 md:px-8 shrink-0 z-10 border-b ${isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3 md:gap-4">
+        <button onClick={() => setIsMobileMenuOpen(true)} className={`md:hidden p-2 rounded-xl transition-colors ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+          <Menu size={20} />
+        </button>
         <div className={`text-lg md:text-xl font-black ${isDark ? 'text-white' : 'text-slate-800'}`}>{currentUser.role === 'teacher' ? 'ระบบผู้สอน (Admin)' : 'พื้นที่เรียนรู้'}</div>
         {currentUser.role === 'teacher' && (
            <div className={`hidden lg:flex items-center text-[10px] font-bold px-3 py-1.5 rounded-full border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
@@ -363,7 +444,8 @@ function TopNav({ currentUser, syncStatus, dbUrl, theme }) {
           {currentUser.data.profileImg ? <img src={getValidImgUrl(currentUser.data.profileImg)} className="w-full h-full object-cover rounded-full"/> : <User size={16} className="text-slate-400" />}
         </div>
         <div className="flex flex-col">
-          <span className={`text-sm font-black leading-tight ${isDark ? 'text-white' : 'text-slate-800'}`}>{currentUser.data.name}</span>
+          <span className={`text-sm font-black leading-tight hidden sm:block ${isDark ? 'text-white' : 'text-slate-800'}`}>{currentUser.data.name}</span>
+          <span className={`text-sm font-black leading-tight sm:hidden ${isDark ? 'text-white' : 'text-slate-800'}`}>โปรไฟล์</span>
           <span className="text-[10px] font-bold text-blue-500">{currentUser.role === 'teacher' ? 'แอดมิน' : `นักเรียน ห้อง ${currentUser.data.room}`}</span>
         </div>
       </div>
@@ -426,7 +508,7 @@ function TeacherAnnouncements({ announcements, setAnnouncements, subjects, getUn
   const [form, setForm] = useState({ title: '', content: '', linkUrl: '', targetSubject: 'all', targetRoom: 'all' });
   const [imageFile, setImageFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [deleteId, setDeleteId] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null); 
   const isDark = theme === 'dark';
 
   const handleSave = async (e) => {
@@ -434,7 +516,6 @@ function TeacherAnnouncements({ announcements, setAnnouncements, subjects, getUn
     if (!form.title || !form.content) return showToast('กรุณากรอกหัวข้อและเนื้อหาประกาศให้ครบถ้วน');
     
     let uploadedImageUrl = '';
-    
     if (imageFile) {
       if (!dbUrl) return showToast('กรุณาตั้งค่า Database URL เพื่ออัปโหลดรูปภาพ');
       setIsUploading(true);
@@ -451,41 +532,23 @@ function TeacherAnnouncements({ announcements, setAnnouncements, subjects, getUn
             resolve();
           };
         });
-      } catch (error) {
-        showToast('อัปโหลดรูปภาพล้มเหลว ประกาศจะถูกสร้างโดยไม่มีรูป');
-      } finally {
-        setIsUploading(false);
-      }
+      } catch (error) { showToast('อัปโหลดรูปล้มเหลว ประกาศจะถูกสร้างโดยไม่มีรูป'); } finally { setIsUploading(false); }
     }
 
-    const newAnn = { 
-      ...form, 
-      id: `ann${Date.now()}`, 
-      date: new Date().toLocaleString('th-TH'),
-      imageUrl: uploadedImageUrl
-    };
-    
+    const newAnn = { ...form, id: `ann${Date.now()}`, date: new Date().toLocaleString('th-TH'), imageUrl: uploadedImageUrl };
     setAnnouncements([newAnn, ...announcements]);
-    setShowForm(false);
-    showToast('สร้างประกาศสำเร็จ');
+    setShowForm(false); showToast('สร้างประกาศสำเร็จ');
     setForm({ title: '', content: '', linkUrl: '', targetSubject: 'all', targetRoom: 'all' });
     setImageFile(null);
   };
 
-  const handleDelete = (id) => {
-    setDeleteId(id);
-  };
-
-  const confirmDelete = () => {
-    setAnnouncements(announcements.filter(a => a.id !== deleteId));
-    setDeleteId(null);
-    showToast('ลบประกาศสำเร็จ');
-  };
+  const executeDelete = () => { setAnnouncements(announcements.filter(a => a.id !== confirmDel)); setConfirmDel(null); showToast('ลบประกาศเรียบร้อยแล้ว'); };
 
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+      <ConfirmModal isOpen={!!confirmDel} title="ยืนยันการลบประกาศ" message="คุณต้องการลบประกาศข่าวสารนี้ใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้" onConfirm={executeDelete} onCancel={() => setConfirmDel(null)} theme={theme} />
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3"><Bell className="mr-2 text-blue-500"/> จัดการประกาศข่าวสาร</h2>
         <button onClick={() => setShowForm(!showForm)} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors"><Plus size={16} className="inline mr-2"/> สร้างประกาศ</button>
@@ -499,25 +562,16 @@ function TeacherAnnouncements({ announcements, setAnnouncements, subjects, getUn
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-4 border-t border-dashed border-slate-300 dark:border-slate-600">
             <div>
               <label className="block text-sm font-bold mb-2 flex items-center"><Layers size={16} className="mr-2 text-blue-500"/> แสดงเฉพาะวิชา</label>
-              <select value={form.targetSubject} onChange={e=>setForm({...form, targetSubject: e.target.value})} className={inputClass}>
-                 <option value="all">ทุกวิชา (เห็นทุกคน)</option>
-                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              <select value={form.targetSubject} onChange={e=>setForm({...form, targetSubject: e.target.value})} className={inputClass}><option value="all">ทุกวิชา (เห็นทุกคน)</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
             </div>
             <div>
               <label className="block text-sm font-bold mb-2 flex items-center"><Users size={16} className="mr-2 text-emerald-500"/> แสดงเฉพาะห้องเรียน</label>
-              <select value={form.targetRoom} onChange={e=>setForm({...form, targetRoom: e.target.value})} className={inputClass}>
-                 <option value="all">ทุกห้อง (เห็นทุกคน)</option>
-                 {getUniqueRooms().map(r => <option key={r} value={r}>ห้อง {r}</option>)}
-              </select>
+              <select value={form.targetRoom} onChange={e=>setForm({...form, targetRoom: e.target.value})} className={inputClass}><option value="all">ทุกห้อง (เห็นทุกคน)</option>{getUniqueRooms().map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-4 border-t border-dashed border-slate-300 dark:border-slate-600">
-            <div>
-              <label className="block text-sm font-bold mb-2 flex items-center"><ExternalLink size={16} className="mr-2 text-indigo-500"/> แนบลิงก์เพิ่มเติม (ถ้ามี)</label>
-              <input type="text" value={form.linkUrl} onChange={e=>setForm({...form, linkUrl: e.target.value})} className={inputClass} placeholder="เช่น https://www.google.com" />
-            </div>
+            <div><label className="block text-sm font-bold mb-2 flex items-center"><ExternalLink size={16} className="mr-2 text-indigo-500"/> แนบลิงก์เพิ่มเติม (ถ้ามี)</label><input type="text" value={form.linkUrl} onChange={e=>setForm({...form, linkUrl: e.target.value})} className={inputClass} placeholder="เช่น https://www.google.com" /></div>
             <div>
               <label className="block text-sm font-bold mb-2 flex items-center"><ImageIcon size={16} className="mr-2 text-pink-500"/> แนบรูปภาพประกอบ (ถ้ามี)</label>
               <div className={`border-2 border-dashed rounded-xl p-3 text-center relative cursor-pointer transition-colors ${isDark ? 'border-slate-600 bg-slate-900/50 hover:border-pink-500' : 'border-slate-300 bg-slate-50 hover:border-pink-500'}`}>
@@ -526,12 +580,7 @@ function TeacherAnnouncements({ announcements, setAnnouncements, subjects, getUn
               </div>
             </div>
           </div>
-          
-          <div className="flex justify-end pt-4">
-            <button type="submit" disabled={isUploading} className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md flex items-center disabled:opacity-50">
-              {isUploading ? <><RefreshCw size={18} className="mr-2 animate-spin"/> กำลังอัปโหลด...</> : 'บันทึกและประกาศ'}
-            </button>
-          </div>
+          <div className="flex justify-end pt-4"><button type="submit" disabled={isUploading} className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md flex items-center disabled:opacity-50">{isUploading ? <><RefreshCw size={18} className="mr-2 animate-spin"/> กำลังอัปโหลด...</> : 'บันทึกและประกาศ'}</button></div>
         </form>
       )}
 
@@ -540,27 +589,21 @@ function TeacherAnnouncements({ announcements, setAnnouncements, subjects, getUn
           const targetedSubjectName = ann.targetSubject !== 'all' ? subjects.find(s => s.id === ann.targetSubject)?.name : 'ทุกวิชา';
           return (
             <div key={ann.id} className={`p-6 rounded-3xl shadow-sm relative group border flex flex-col md:flex-row gap-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              <button onClick={() => handleDelete(ann.id)} className="absolute top-4 right-4 p-2 text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={18}/></button>
+              <button onClick={() => setConfirmDel(ann.id)} className="absolute top-4 right-4 p-2 text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={18}/></button>
               {ann.imageUrl && (
-                <div className="w-full md:w-64 h-40 shrink-0 rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
-                  <img src={getValidImgUrl(ann.imageUrl)} alt="Announcement" className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"/>
-                </div>
+                <div className="w-full md:w-64 h-40 shrink-0 rounded-2xl overflow-hidden border border-slate-200 shadow-sm"><img src={getValidImgUrl(ann.imageUrl)} alt="Announcement" className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"/></div>
               )}
               <div className="flex-1 flex flex-col">
                 <div className="flex flex-wrap gap-2 mb-3">
                    <div className={`text-xs font-bold flex items-center px-2 py-1 rounded-md ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-slate-100 text-slate-500'}`}><Clock size={12} className="mr-1.5"/> {ann.date}</div>
                    {(ann.targetSubject !== 'all' || ann.targetRoom !== 'all') && (
-                     <div className="text-xs font-bold text-white bg-amber-500 px-3 py-1 rounded-md shadow-sm">
-                        เฉพาะ: {ann.targetSubject !== 'all' ? targetedSubjectName : 'ทุกวิชา'} {ann.targetRoom !== 'all' ? `(ห้อง ${ann.targetRoom})` : ''}
-                     </div>
+                     <div className="text-xs font-bold text-white bg-amber-500 px-3 py-1 rounded-md shadow-sm">เฉพาะ: {ann.targetSubject !== 'all' ? targetedSubjectName : 'ทุกวิชา'} {ann.targetRoom !== 'all' ? `(ห้อง ${ann.targetRoom})` : ''}</div>
                    )}
                 </div>
                 <h3 className="text-2xl font-black mb-3 pr-8 text-blue-600 dark:text-blue-400">{ann.title}</h3>
                 <p className={`whitespace-pre-wrap font-medium mb-5 flex-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{ann.content}</p>
                 {ann.linkUrl && (
-                  <div className="mt-auto pt-4">
-                     <a href={ann.linkUrl.startsWith('http') ? ann.linkUrl : `https://${ann.linkUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><ExternalLink size={14} className="mr-2"/> เปิดลิงก์แนบ</a>
-                  </div>
+                  <div className="mt-auto pt-4"><a href={ann.linkUrl.startsWith('http') ? ann.linkUrl : `https://${ann.linkUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><ExternalLink size={14} className="mr-2"/> เปิดลิงก์แนบ</a></div>
                 )}
               </div>
             </div>
@@ -568,7 +611,6 @@ function TeacherAnnouncements({ announcements, setAnnouncements, subjects, getUn
         })}
         {announcements.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีการสร้างประกาศข่าวสาร</div>}
       </div>
-      <ConfirmModal isOpen={!!deleteId} title="ลบประกาศ" message="ยืนยันการลบประกาศข่าวสารนี้หรือไม่?" onConfirm={confirmDelete} onCancel={() => setDeleteId(null)} isDark={isDark} />
     </div>
   );
 }
@@ -576,42 +618,41 @@ function TeacherAnnouncements({ announcements, setAnnouncements, subjects, getUn
 function TeacherSubjects({ subjects, setSubjects, showToast, theme }) {
   const [showForm, setShowForm] = useState(false);
   const [newSub, setNewSub] = useState({ code: '', name: '', semester: '1', year: new Date().getFullYear() + 543 + '', midtermMax: 20, finalMax: 30 });
-  const [deleteId, setDeleteId] = useState(null);
+  const [editSub, setEditSub] = useState(null); 
+  const [confirmDel, setConfirmDel] = useState(null); 
   const isDark = theme === 'dark';
 
-  const handleSave = (e) => {
+  const handleSaveCreate = (e) => {
     e.preventDefault();
     setSubjects([...subjects, { ...newSub, id: `sub${Date.now()}` }]);
     setShowForm(false); showToast('สร้างวิชาใหม่สำเร็จ');
     setNewSub({ code: '', name: '', semester: '1', year: new Date().getFullYear() + 543 + '', midtermMax: 20, finalMax: 30 });
   };
-  
-  const handleDelete = (id) => { 
-    setDeleteId(id); 
+
+  const handleSaveEdit = (e) => {
+    e.preventDefault();
+    setSubjects(subjects.map(s => s.id === editSub.id ? editSub : s));
+    setEditSub(null); showToast('บันทึกการแก้ไขรายวิชาสำเร็จ');
   };
 
-  const confirmDelete = () => {
-    setSubjects(subjects.filter(s=>s.id!==deleteId));
-    setDeleteId(null);
-    showToast('ลบวิชาสำเร็จ');
-  };
+  const executeDelete = () => { setSubjects(subjects.filter(s => s.id !== confirmDel)); setConfirmDel(null); showToast('ลบวิชาเรียบร้อยแล้ว'); };
 
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 border font-bold ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-6 relative">
+      <ConfirmModal isOpen={!!confirmDel} title="ยืนยันการลบวิชาเรียน" message="คุณต้องการลบรายวิชานี้ใช่หรือไม่? ข้อมูลการลงทะเบียนเรียนและคะแนนที่ผูกกับวิชานี้อาจได้รับผลกระทบ" onConfirm={executeDelete} onCancel={() => setConfirmDel(null)} theme={theme} />
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3"><Layers className="mr-2 text-blue-500"/> จัดการวิชาเรียน</h2>
         <button onClick={() => setShowForm(!showForm)} className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md"><Plus size={16} className="inline mr-2"/> สร้างวิชา</button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleSave} className={`p-6 rounded-3xl shadow-sm grid grid-cols-1 md:grid-cols-2 gap-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <form onSubmit={handleSaveCreate} className={`p-6 rounded-3xl shadow-sm grid grid-cols-1 md:grid-cols-2 gap-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div><label className="block text-sm font-bold mb-2">รหัสวิชา</label><input required type="text" value={newSub.code} onChange={e=>setNewSub({...newSub, code: e.target.value})} className={inputClass} placeholder="เช่น ว21101" /></div>
           <div><label className="block text-sm font-bold mb-2">ชื่อวิชา</label><input required type="text" value={newSub.name} onChange={e=>setNewSub({...newSub, name: e.target.value})} className={inputClass} /></div>
           <div><label className="block text-sm font-bold mb-2">ภาคเรียน</label><select value={newSub.semester} onChange={e=>setNewSub({...newSub, semester: e.target.value})} className={inputClass}><option value="1">1</option><option value="2">2</option></select></div>
           <div><label className="block text-sm font-bold mb-2">ปีการศึกษา</label><input required type="text" value={newSub.year} onChange={e=>setNewSub({...newSub, year: e.target.value})} className={inputClass} /></div>
-          
           <div className={`md:col-span-2 p-5 rounded-2xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
             <h4 className="font-bold text-blue-500 mb-4 flex items-center"><Settings size={16} className="mr-2" /> ตั้งค่าคะแนนเต็มสำหรับการสอบ</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -619,16 +660,18 @@ function TeacherSubjects({ subjects, setSubjects, showToast, theme }) {
               <div><label className="block text-sm font-bold mb-2">คะแนนเต็ม ปลายภาค</label><input required type="number" min="0" value={newSub.finalMax} onChange={e=>setNewSub({...newSub, finalMax: parseInt(e.target.value) || 0})} className={inputClass} /></div>
             </div>
           </div>
-
           <div className="md:col-span-2 flex justify-end mt-2"><button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">บันทึกวิชา</button></div>
         </form>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {subjects.map(sub => (
-          <div key={sub.id} className={`p-6 rounded-2xl shadow-sm relative group border flex flex-col justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div key={sub.id} className={`p-6 rounded-2xl shadow-sm relative group border flex flex-col justify-between transition-all ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-blue-300'}`}>
             <div>
-              <button onClick={() => handleDelete(sub.id)} className="absolute top-4 right-4 text-red-400 opacity-0 group-hover:opacity-100"><Trash2 size={18}/></button>
+              <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                 <button onClick={() => setEditSub(sub)} className={`p-1.5 rounded-lg transition-colors text-amber-500 ${isDark ? 'bg-amber-500/10 hover:bg-amber-500/20' : 'bg-amber-50 hover:bg-amber-100'}`} title="แก้ไขข้อมูลวิชา"><Edit size={16}/></button>
+                 <button onClick={() => setConfirmDel(sub.id)} className={`p-1.5 rounded-lg transition-colors text-red-500 ${isDark ? 'bg-red-500/10 hover:bg-red-500/20' : 'bg-red-50 hover:bg-red-100'}`} title="ลบวิชา"><Trash2 size={16}/></button>
+              </div>
               <div className="text-blue-500 font-bold font-mono text-xs bg-blue-500/10 px-3 py-1.5 rounded-lg inline-block">{sub.code}</div>
               <h3 className="text-xl font-black mt-4">{sub.name}</h3>
               <div className={`text-sm font-bold mt-4 p-2.5 rounded-xl flex items-center ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-slate-50 text-slate-500'}`}><Calendar size={14} className="mr-2"/> เทอม {sub.semester}/{sub.year}</div>
@@ -640,12 +683,34 @@ function TeacherSubjects({ subjects, setSubjects, showToast, theme }) {
           </div>
         ))}
       </div>
-      <ConfirmModal isOpen={!!deleteId} title="ลบวิชาเรียน" message="ยืนยันการลบวิชานี้หรือไม่? ข้อมูลการเข้าเรียนและการส่งงานที่เกี่ยวข้องอาจได้รับผลกระทบ" onConfirm={confirmDelete} onCancel={() => setDeleteId(null)} isDark={isDark} />
+
+      {editSub && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className={`rounded-3xl w-full max-w-xl p-8 shadow-2xl relative border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <button onClick={() => setEditSub(null)} className={`absolute top-5 right-5 p-2 rounded-full transition-colors ${isDark ? 'text-slate-400 hover:text-white bg-slate-900' : 'text-slate-500 hover:text-slate-900 bg-slate-100'}`}><X size={20}/></button>
+            <h3 className="text-xl font-black mb-6 flex items-center"><Edit className="mr-2 text-amber-500"/> แก้ไขรายวิชา</h3>
+            <form onSubmit={handleSaveEdit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div><label className="block text-sm font-bold mb-2">รหัสวิชา</label><input required type="text" value={editSub.code || ''} onChange={e=>setEditSub({...editSub, code: e.target.value})} className={inputClass} /></div>
+              <div><label className="block text-sm font-bold mb-2">ชื่อวิชา</label><input required type="text" value={editSub.name || ''} onChange={e=>setEditSub({...editSub, name: e.target.value})} className={inputClass} /></div>
+              <div><label className="block text-sm font-bold mb-2">ภาคเรียน</label><select value={editSub.semester || '1'} onChange={e=>setEditSub({...editSub, semester: e.target.value})} className={inputClass}><option value="1">1</option><option value="2">2</option></select></div>
+              <div><label className="block text-sm font-bold mb-2">ปีการศึกษา</label><input required type="text" value={editSub.year || ''} onChange={e=>setEditSub({...editSub, year: e.target.value})} className={inputClass} /></div>
+              <div className={`md:col-span-2 p-5 rounded-2xl mt-2 border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <h4 className="font-bold text-amber-500 mb-4 flex items-center"><Settings size={16} className="mr-2" /> แก้ไขคะแนนเต็มสำหรับการสอบ</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div><label className="block text-sm font-bold mb-2">คะแนนเต็ม กลางภาค</label><input required type="number" min="0" value={editSub.midtermMax ?? 20} onChange={e=>setEditSub({...editSub, midtermMax: parseInt(e.target.value) || 0})} className={inputClass} /></div>
+                  <div><label className="block text-sm font-bold mb-2">คะแนนเต็ม ปลายภาค</label><input required type="number" min="0" value={editSub.finalMax ?? 30} onChange={e=>setEditSub({...editSub, finalMax: parseInt(e.target.value) || 0})} className={inputClass} /></div>
+                </div>
+              </div>
+              <div className="md:col-span-2 flex justify-end mt-4"><button type="submit" className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold shadow-md w-full md:w-auto">บันทึกการแก้ไข</button></div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function TeacherStudents({ subjects, students, setStudents, enrollments, setEnrollments, showToast, theme }) {
+function TeacherStudents({ subjects, students, setStudents, enrollments, setEnrollments, saveState, showToast, theme }) {
   const [filterSub, setFilterSub] = useState('all');
   const [filterRoom, setFilterRoom] = useState('all');
   const [showImport, setShowImport] = useState(false);
@@ -656,7 +721,7 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
   
   const [singleStu, setSingleStu] = useState({ id: '', name: '', number: '', section: '', room: '', subjectId: '' });
   const [editForm, setEditForm] = useState(null);
-  const [deleteId, setDeleteId] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null); 
 
   const [batchSub, setBatchSub] = useState(subjects[0]?.id || '');
   const [batchRoom, setBatchRoom] = useState('');
@@ -680,8 +745,9 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
         newEnrolls.push({ id: `e${Date.now()}_${id}`, studentId: id, subjectId: importSub });
     });
     if(newSts.length > 0 || newEnrolls.length > 0) {
-      setStudents([...students, ...newSts]); setEnrollments([...enrollments, ...newEnrolls]);
-      showToast(`สำเร็จ: ใหม่ ${newSts.length} คน / ลงทะเบียน ${newEnrolls.length} รายการ`); setShowImport(false); setPasteData('');
+      saveState({ students: [...students, ...newSts], enrollments: [...enrollments, ...newEnrolls] });
+      showToast(`สำเร็จ: ใหม่ ${newSts.length} คน / ลงทะเบียน ${newEnrolls.length} รายการ`); 
+      setShowImport(false); setPasteData('');
     } else showToast('ไม่มีข้อมูลใหม่');
   };
 
@@ -689,17 +755,23 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
     e.preventDefault();
     if (!singleStu.id || !singleStu.name) return showToast('กรุณากรอกรหัสและชื่อ');
     const exists = students.find(s => String(s.id).trim() === String(singleStu.id).trim());
+    
+    let newStudents = students;
     if (!exists) {
-       setStudents([...students, { id: singleStu.id.trim(), password: '12345678', name: singleStu.name, number: singleStu.number, section: singleStu.section || '-', room: singleStu.room.trim(), profileImg: '' }]);
+        newStudents = [...students, { id: singleStu.id.trim(), password: '12345678', name: singleStu.name, number: singleStu.number, section: singleStu.section || '-', room: singleStu.room.trim(), profileImg: '' }];
     }
+
+    let newEnrollments = enrollments;
     if (singleStu.subjectId) {
        const isEnrolled = enrollments.find(en => String(en.studentId).trim() === String(singleStu.id).trim() && en.subjectId === singleStu.subjectId);
        if (!isEnrolled) {
-          setEnrollments([...enrollments, { id: `e${Date.now()}_${singleStu.id}`, studentId: singleStu.id.trim(), subjectId: singleStu.subjectId }]);
+           newEnrollments = [...enrollments, { id: `e${Date.now()}_${singleStu.id}`, studentId: singleStu.id.trim(), subjectId: singleStu.subjectId }];
        }
     }
-    showToast('เพิ่มนักเรียนสำเร็จ');
-    setSingleStu({ id: '', name: '', number: '', section: '', room: '', subjectId: singleStu.subjectId });
+    
+    saveState({ students: newStudents, enrollments: newEnrollments });
+    showToast('เพิ่มนักเรียนสำเร็จ'); 
+    setSingleStu({ id: '', name: '', number: '', section: '', room: '', subjectId: singleStu.subjectId }); 
     setShowAddSingle(false);
   };
 
@@ -711,28 +783,22 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
     const newEnrolls = [];
     studentsInRoom.forEach(s => {
        const exists = enrollments.find(e => String(e.studentId).trim() === String(s.id).trim() && e.subjectId === batchSub);
-       if (!exists) {
-         newEnrolls.push({ id: `e${Date.now()}_${s.id}_${batchSub}`, studentId: s.id, subjectId: batchSub });
-       }
+       if (!exists) newEnrolls.push({ id: `e${Date.now()}_${s.id}_${batchSub}`, studentId: s.id, subjectId: batchSub });
     });
     
     if (newEnrolls.length > 0) {
-       setEnrollments([...enrollments, ...newEnrolls]);
-       showToast(`ลงทะเบียนวิชานี้ให้นักเรียนห้อง ${batchRoom} จำนวน ${newEnrolls.length} คนสำเร็จ`);
+       saveState({ enrollments: [...enrollments, ...newEnrolls] }); 
+       showToast(`ลงทะเบียนวิชานี้ให้นักเรียนห้อง ${batchRoom} จำนวน ${newEnrolls.length} คนสำเร็จ`); 
        setShowBatchEnroll(false);
-    } else {
-       showToast('นักเรียนทุกคนในห้องนี้ลงทะเบียนวิชานี้ครบอยู่แล้ว');
-    }
+    } else { showToast('นักเรียนทุกคนในห้องนี้ลงทะเบียนวิชานี้ครบอยู่แล้ว'); }
   };
 
-  const handleDelete = (id) => {
-     setDeleteId(id);
-  };
-
-  const confirmDelete = () => {
-     setStudents(students.filter(x=>x.id!==deleteId)); 
-     setEnrollments(enrollments.filter(x=>x.studentId!==deleteId));
-     setDeleteId(null);
+  const executeDelete = () => {
+     saveState({
+         students: students.filter(x => x.id !== confirmDel),
+         enrollments: enrollments.filter(x => x.studentId !== confirmDel)
+     });
+     setConfirmDel(null); 
      showToast('ลบนักเรียนออกจากระบบสำเร็จ');
   };
 
@@ -743,30 +809,26 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
 
   const handleSaveEdit = (e) => {
     e.preventDefault();
-    setStudents(students.map(s => String(s.id).trim() === String(editForm.id).trim() ? { ...s, name: editForm.name, room: editForm.room, number: editForm.number, section: editForm.section } : s));
+    const updatedStudents = students.map(s => String(s.id).trim() === String(editForm.id).trim() ? { ...s, name: editForm.name, room: editForm.room, number: editForm.number, section: editForm.section } : s);
     
     let newEnrollments = enrollments.filter(e => String(e.studentId).trim() !== String(editForm.id).trim());
-    const newEnrollsToAdd = editForm.enrolledSubjectIds.map(subId => ({
-       id: `e${Date.now()}_${editForm.id}_${subId}`,
-       studentId: editForm.id,
-       subjectId: subId
-    }));
-    setEnrollments([...newEnrollments, ...newEnrollsToAdd]);
-    
-    setEditForm(null);
+    const newEnrollsToAdd = editForm.enrolledSubjectIds.map(subId => ({ id: `e${Date.now()}_${editForm.id}_${subId}`, studentId: editForm.id, subjectId: subId }));
+    newEnrollments = [...newEnrollments, ...newEnrollsToAdd];
+
+    saveState({ students: updatedStudents, enrollments: newEnrollments });
+    setEditForm(null); 
     showToast('อัปเดตข้อมูลและรายวิชาสำเร็จ');
   };
 
   const toggleSubject = (subId) => {
-     if(editForm.enrolledSubjectIds.includes(subId)) {
-        setEditForm({...editForm, enrolledSubjectIds: editForm.enrolledSubjectIds.filter(id => id !== subId)});
-     } else {
-        setEditForm({...editForm, enrolledSubjectIds: [...editForm.enrolledSubjectIds, subId]});
-     }
+     if(editForm.enrolledSubjectIds.includes(subId)) setEditForm({...editForm, enrolledSubjectIds: editForm.enrolledSubjectIds.filter(id => id !== subId)});
+     else setEditForm({...editForm, enrolledSubjectIds: [...editForm.enrolledSubjectIds, subId]});
   };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      <ConfirmModal isOpen={!!confirmDel} title="ยืนยันการลบนักเรียน" message="คุณต้องการลบนักเรียนคนนี้ใช่หรือไม่? ข้อมูลการเรียน คะแนน และการเข้าเรียนจะถูกลบทั้งหมด" onConfirm={executeDelete} onCancel={() => setConfirmDel(null)} theme={theme} />
+
       <div className={`rounded-3xl overflow-hidden shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className={`p-5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
           <h2 className="text-lg font-black flex items-center"><Users className="mr-2 text-blue-500" size={20} /> ทะเบียนนักเรียน</h2>
@@ -793,11 +855,11 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
         {showAddSingle && (
           <form onSubmit={handleAddSingle} className={`p-6 border-b grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
              <div className="md:col-span-3 font-bold text-blue-500 mb-2">เพิ่มนักเรียนใหม่ (ทีละคน)</div>
-             <div><label className="block text-xs font-bold mb-1">รหัสประจำตัว *</label><input required value={singleStu.id} onChange={e=>setSingleStu({...singleStu, id: e.target.value})} className={inputClass} placeholder="รหัส" /></div>
-             <div><label className="block text-xs font-bold mb-1">ชื่อ-นามสกุล *</label><input required value={singleStu.name} onChange={e=>setSingleStu({...singleStu, name: e.target.value})} className={inputClass} placeholder="ชื่อสกุล" /></div>
-             <div><label className="block text-xs font-bold mb-1">ห้อง (เช่น 1/1) *</label><input required value={singleStu.room} onChange={e=>setSingleStu({...singleStu, room: e.target.value})} className={inputClass} placeholder="ห้อง" /></div>
-             <div><label className="block text-xs font-bold mb-1">เลขที่</label><input value={singleStu.number} onChange={e=>setSingleStu({...singleStu, number: e.target.value})} className={inputClass} placeholder="เลขที่" /></div>
-             <div><label className="block text-xs font-bold mb-1">ตอน</label><input value={singleStu.section} onChange={e=>setSingleStu({...singleStu, section: e.target.value})} className={inputClass} placeholder="ก/ข (ไม่บังคับ)" /></div>
+             <div><label className="block text-xs font-bold mb-1">รหัสประจำตัว *</label><input required value={singleStu.id || ''} onChange={e=>setSingleStu({...singleStu, id: e.target.value})} className={inputClass} placeholder="รหัส" /></div>
+             <div><label className="block text-xs font-bold mb-1">ชื่อ-นามสกุล *</label><input required value={singleStu.name || ''} onChange={e=>setSingleStu({...singleStu, name: e.target.value})} className={inputClass} placeholder="ชื่อสกุล" /></div>
+             <div><label className="block text-xs font-bold mb-1">ห้อง (เช่น 1/1) *</label><input required value={singleStu.room || ''} onChange={e=>setSingleStu({...singleStu, room: e.target.value})} className={inputClass} placeholder="ห้อง" /></div>
+             <div><label className="block text-xs font-bold mb-1">เลขที่</label><input value={singleStu.number || ''} onChange={e=>setSingleStu({...singleStu, number: e.target.value})} className={inputClass} placeholder="เลขที่" /></div>
+             <div><label className="block text-xs font-bold mb-1">ตอน</label><input value={singleStu.section || ''} onChange={e=>setSingleStu({...singleStu, section: e.target.value})} className={inputClass} placeholder="ก/ข (ไม่บังคับ)" /></div>
              <div><label className="block text-xs font-bold mb-1">ลงทะเบียนวิชา</label><select value={singleStu.subjectId} onChange={e=>setSingleStu({...singleStu, subjectId: e.target.value})} className={inputClass}><option value="">ไม่ลงทะเบียนตอนนี้</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
              <div className="md:col-span-3 text-right"><button type="submit" className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold shadow-md">บันทึกข้อมูล</button></div>
           </form>
@@ -829,7 +891,7 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
                   <td className={`p-4 text-center text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{s.lastLogin ? s.lastLogin : '-'}</td>
                   <td className="p-4 text-center">
                     <button onClick={() => openEdit(s)} className="text-amber-500 hover:text-amber-600 mr-3" title="แก้ไขข้อมูล/ลงทะเบียนวิชา"><Edit size={16}/></button>
-                    <button onClick={() => handleDelete(s.id)} className="text-red-400 hover:text-red-500" title="ลบนักเรียน"><Trash2 size={16}/></button>
+                    <button onClick={() => setConfirmDel(s.id)} className="text-red-400 hover:text-red-500" title="ลบนักเรียน"><Trash2 size={16}/></button>
                   </td>
                 </tr>
               ))}
@@ -847,10 +909,10 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
             
             <form onSubmit={handleSaveEdit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold mb-1">รหัสประจำตัว</label><input disabled value={editForm.id} className={`${inputClass} opacity-50 cursor-not-allowed`} /></div>
-                <div><label className="block text-xs font-bold mb-1">ชื่อ-สกุล</label><input required value={editForm.name} onChange={e=>setEditForm({...editForm, name: e.target.value})} className={inputClass} /></div>
-                <div><label className="block text-xs font-bold mb-1">ห้อง</label><input required value={editForm.room} onChange={e=>setEditForm({...editForm, room: e.target.value})} className={inputClass} /></div>
-                <div><label className="block text-xs font-bold mb-1">เลขที่</label><input value={editForm.number} onChange={e=>setEditForm({...editForm, number: e.target.value})} className={inputClass} /></div>
+                <div><label className="block text-xs font-bold mb-1">รหัสประจำตัว</label><input disabled value={editForm.id || ''} className={`${inputClass} opacity-50 cursor-not-allowed`} /></div>
+                <div><label className="block text-xs font-bold mb-1">ชื่อ-สกุล</label><input required value={editForm.name || ''} onChange={e=>setEditForm({...editForm, name: e.target.value})} className={inputClass} /></div>
+                <div><label className="block text-xs font-bold mb-1">ห้อง</label><input required value={editForm.room || ''} onChange={e=>setEditForm({...editForm, room: e.target.value})} className={inputClass} /></div>
+                <div><label className="block text-xs font-bold mb-1">เลขที่</label><input value={editForm.number || ''} onChange={e=>setEditForm({...editForm, number: e.target.value})} className={inputClass} /></div>
               </div>
 
               <div className={`p-4 rounded-xl mt-4 border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
@@ -865,15 +927,11 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
                   {subjects.length === 0 && <div className="text-xs text-slate-500 font-bold">ยังไม่มีรายวิชาในระบบ</div>}
                 </div>
               </div>
-
-              <div className="pt-4 flex justify-end">
-                <button type="submit" className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md w-full">บันทึกการแก้ไข</button>
-              </div>
+              <div className="pt-4 flex justify-end"><button type="submit" className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md w-full">บันทึกการแก้ไข</button></div>
             </form>
           </div>
         </div>
       )}
-      <ConfirmModal isOpen={!!deleteId} title="ลบรายชื่อนักเรียน" message="ยืนยันการลบนักเรียนคนนี้ออกจากระบบหรือไม่? ข้อมูลทั้งหมดของนักเรียนคนนี้จะถูกลบ" onConfirm={confirmDelete} onCancel={() => setDeleteId(null)} isDark={isDark} />
     </div>
   );
 }
@@ -897,7 +955,7 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
       initialStatus[s.id] = existingRecord ? existingRecord.status : 'present';
     });
     setTempStatus(initialStatus);
-  }, [selectedSub, date, targetStudents.length]); // eslint-disable-line
+  }, [selectedSub, date, targetStudents.length]); 
 
   const handleStatusChange = (studentId, status) => { setTempStatus({ ...tempStatus, [studentId]: status }); };
 
@@ -908,15 +966,10 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
     targetStudents.forEach(s => {
       const status = tempStatus[s.id] || 'present';
       const existingIndex = newAttendance.findIndex(a => a.studentId === s.id && a.subjectId === selectedSub && a.date === date);
-
       if (existingIndex >= 0) {
-        if (newAttendance[existingIndex].status !== status) {
-           newAttendance[existingIndex].status = status;
-           changesMade = true;
-        }
+        if (newAttendance[existingIndex].status !== status) { newAttendance[existingIndex].status = status; changesMade = true; }
       } else {
-        newAttendance.push({ id: `at${Date.now()}_${s.id}_${Math.random()}`, subjectId: selectedSub, studentId: s.id, date, status });
-        changesMade = true;
+        newAttendance.push({ id: `at${Date.now()}_${s.id}_${Math.random()}`, subjectId: selectedSub, studentId: s.id, date, status }); changesMade = true;
       }
     });
 
@@ -941,7 +994,7 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
 
       <div className={`rounded-3xl overflow-hidden shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className={`p-4 text-sm font-bold border-b flex items-center ${isDark ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800' : 'bg-emerald-50 text-emerald-800 border-emerald-100'}`}>
-          <AlertCircle size={16} className="mr-2"/> ระบบตั้งค่า "มาเรียน" ให้ทุกคนอัตโนมัติ แก้ไขสถานะให้เสร็จก่อน แล้วจึงกด "บันทึกการเข้าเรียน" ด้านบน
+          <AlertCircle size={16} className="mr-2 shrink-0"/> <span className="leading-tight">ระบบตั้งค่า "มาเรียน" ให้ทุกคนอัตโนมัติ แก้ไขสถานะให้เสร็จก่อน แล้วจึงกด "บันทึกการเข้าเรียน" ด้านบน</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm min-w-[600px]">
@@ -984,11 +1037,7 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
   const targetStudents = enrolledSts.filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim());
   const subObj = subjects.find(s => s.id === filterSub);
 
-  const allDatesInMonth = [...new Set(
-    attendance
-      .filter(a => a.subjectId === filterSub && a.date.startsWith(filterMonth))
-      .map(a => a.date)
-  )].sort();
+  const allDatesInMonth = [...new Set(attendance.filter(a => a.subjectId === filterSub && a.date.startsWith(filterMonth)).map(a => a.date))].sort();
 
   const getStatusText = (status) => {
     switch(status) {
@@ -1018,16 +1067,12 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
         const statusTxt = record ? (record.status === 'present' ? 'ม' : record.status === 'late' ? 'ส' : record.status === 'leave' ? 'ล' : 'ข') : '-';
         csv += `${statusTxt},`;
       });
-      
       csv += `${counts.present},${counts.late},${counts.leave},${counts.absent}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); 
-    link.href = url; 
-    link.download = `Attendance_${subObj.code}_${filterMonth}.csv`; 
-    link.click();
+    const link = document.createElement('a'); link.href = url; link.download = `Attendance_${subObj.code}_${filterMonth}.csv`; link.click();
     showToast('ดาวน์โหลดรายงานเช็กชื่อ Excel (.csv) สำเร็จ');
   };
 
@@ -1049,18 +1094,9 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
           <table className="w-full text-left text-sm min-w-max border-collapse">
             <thead className={`font-bold sticky top-0 z-10 border-b shadow-sm ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
               <tr>
-                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ห้อง</th>
-                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>เลขที่</th>
-                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รหัส / ชื่อ-สกุล</th>
-                
-                {allDatesInMonth.map(d => (
-                  <th key={d} className={`p-2 text-center border-r text-xs whitespace-nowrap ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`}>
-                    {d.split('-')[2]}/{d.split('-')[1]}
-                  </th>
-                ))}
-                
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ห้อง</th><th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>เลขที่</th><th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รหัส / ชื่อ-สกุล</th>
+                {allDatesInMonth.map(d => (<th key={d} className={`p-2 text-center border-r text-xs whitespace-nowrap ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`}>{d.split('-')[2]}/{d.split('-')[1]}</th>))}
                 {allDatesInMonth.length === 0 && <th className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ไม่มีข้อมูลในเดือนนี้</th>}
-                
                 <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-green-900/20 text-green-400' : 'border-slate-200 bg-green-50 text-green-700'}`}>มา</th>
                 <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-amber-900/20 text-amber-400' : 'border-slate-200 bg-amber-50 text-amber-700'}`}>สาย</th>
                 <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-blue-900/20 text-blue-400' : 'border-slate-200 bg-blue-50 text-blue-700'}`}>ลา</th>
@@ -1070,25 +1106,18 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {targetStudents.map(stu => {
                 let counts = { present: 0, late: 0, leave: 0, absent: 0 };
-                
                 return (
                   <tr key={stu.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/40'}`}>
                     <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.room}</td>
                     <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.number}</td>
                     <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><span className="text-blue-500 mr-2 font-mono">{stu.id}</span>{stu.name}</td>
-                    
                     {allDatesInMonth.map(date => {
                       const record = attendance.find(a => a.studentId === stu.id && a.subjectId === filterSub && a.date === date);
                       if (record) counts[record.status]++;
                       const statusInfo = getStatusText(record?.status);
-                      return (
-                        <td key={date} className={`p-2 text-center font-black border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                          {record ? <span className={`w-8 h-8 flex items-center justify-center rounded-lg mx-auto ${statusInfo.color}`}>{statusInfo.text}</span> : <span className="text-slate-400">-</span>}
-                        </td>
-                      );
+                      return (<td key={date} className={`p-2 text-center font-black border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{record ? <span className={`w-8 h-8 flex items-center justify-center rounded-lg mx-auto ${statusInfo.color}`}>{statusInfo.text}</span> : <span className="text-slate-400">-</span>}</td>);
                     })}
                     {allDatesInMonth.length === 0 && <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>-</td>}
-
                     <td className={`p-4 text-center font-black border-r ${isDark ? 'border-slate-700 text-green-400' : 'border-slate-100 text-green-600'}`}>{counts.present > 0 ? counts.present : '-'}</td>
                     <td className={`p-4 text-center font-black border-r ${isDark ? 'border-slate-700 text-amber-400' : 'border-slate-100 text-amber-600'}`}>{counts.late > 0 ? counts.late : '-'}</td>
                     <td className={`p-4 text-center font-black border-r ${isDark ? 'border-slate-700 text-blue-400' : 'border-slate-100 text-blue-600'}`}>{counts.leave > 0 ? counts.leave : '-'}</td>
@@ -1122,13 +1151,10 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
     const pts = parseFloat(ptsInput.value);
     const rem = remInput.value.trim();
 
-    if (isNaN(pts) || !rem) {
-      return showToast('กรุณากรอกคะแนนพฤติกรรม (เป็นตัวเลข) และพิมพ์หมายเหตุให้ครบถ้วน');
-    }
+    if (isNaN(pts) || !rem) return showToast('กรุณากรอกคะแนนพฤติกรรม (เป็นตัวเลข) และพิมพ์หมายเหตุให้ครบถ้วน');
 
     setBehaviors([...behaviors, { id: `b${Date.now()}_${Math.random()}`, subjectId: selectedSub, studentId, date, points: pts, remark: rem }]);
-    ptsInput.value = ''; 
-    remInput.value = '';
+    ptsInput.value = ''; remInput.value = '';
     showToast(`บันทึกพฤติกรรม ${pts > 0 ? '+'+pts : pts} คะแนน ให้รหัส ${studentId} สำเร็จ`);
   };
 
@@ -1173,18 +1199,16 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
   );
 }
 
+
 function TeacherMaterials({ subjects, materials, setMaterials, dbUrl, showToast, theme }) {
   const [form, setForm] = useState({ subjectId: subjects[0]?.id || '', title: '', description: '' });
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [deleteId, setDeleteId] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
   const isDark = theme === 'dark';
 
-  const filteredMaterials = materials.filter(m => 
-    m.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    m.description.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredMaterials = materials.filter(m => m.title.toLowerCase().includes(searchQuery.toLowerCase()) || m.description.toLowerCase().includes(searchQuery.toLowerCase()));
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -1205,23 +1229,17 @@ function TeacherMaterials({ subjects, materials, setMaterials, dbUrl, showToast,
            showToast('อัปโหลดไฟล์ไปที่ Google Drive แล้ว');
            setFile(null); setForm({ ...form, title: '', description: '' });
         }
-      } catch (error) {
-        showToast('อัปโหลดล้มเหลว ตรวจสอบการเชื่อมต่อ');
-      } finally { setUploading(false); }
+      } catch (error) { showToast('อัปโหลดล้มเหลว ตรวจสอบการเชื่อมต่อ'); } finally { setUploading(false); }
     };
   };
 
-  const handleDelete = (id) => { setDeleteId(id); };
-  const confirmDelete = () => {
-    setMaterials(materials.filter(m => m.id !== deleteId));
-    setDeleteId(null);
-    showToast('ลบเอกสารสำเร็จ');
-  };
+  const executeDelete = () => { setMaterials(materials.filter(m => m.id !== confirmDel)); setConfirmDel(null); showToast('ลบใบงานเรียบร้อยแล้ว'); };
 
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+       <ConfirmModal isOpen={!!confirmDel} title="ยืนยันการลบเอกสารใบงาน" message="คุณต้องการลบสื่อการเรียน/ใบงานนี้ใช่หรือไม่? ไฟล์ที่อยู่บน Google Drive จะไม่ถูกลบ แต่จะไม่แสดงในระบบนี้อีก" onConfirm={executeDelete} onCancel={() => setConfirmDel(null)} theme={theme} />
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
          <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3"><FolderOpen className="mr-2 text-blue-500"/> คลังสื่อการเรียน / ใบงาน</h2>
          <div className="relative w-full sm:w-auto">
@@ -1240,11 +1258,7 @@ function TeacherMaterials({ subjects, materials, setMaterials, dbUrl, showToast,
                <Upload size={40} className="mx-auto text-blue-500 mb-3"/>
                <p className="font-bold text-blue-500 text-lg">{file ? file.name : 'คลิกหรือลากไฟล์เอกสารมาวาง (PDF/Image)'}</p>
              </div>
-             <div className="md:col-span-2 flex justify-end mt-2">
-               <button type="submit" disabled={uploading} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 disabled:opacity-50">
-                 {uploading ? 'กำลังอัปโหลดไป Drive...' : 'อัปโหลดสื่อ'}
-               </button>
-             </div>
+             <div className="md:col-span-2 flex justify-end mt-2"><button type="submit" disabled={uploading} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 disabled:opacity-50">{uploading ? 'กำลังอัปโหลดไป Drive...' : 'อัปโหลดสื่อ'}</button></div>
           </form>
        </div>
 
@@ -1253,7 +1267,7 @@ function TeacherMaterials({ subjects, materials, setMaterials, dbUrl, showToast,
             const sub = subjects.find(s => s.id === m.subjectId);
             return (
               <div key={m.id} className={`p-5 rounded-2xl shadow-sm relative group border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                <button onClick={()=>handleDelete(m.id)} className="absolute top-4 right-4 text-red-400 opacity-0 group-hover:opacity-100"><Trash2 size={16}/></button>
+                <button onClick={()=>setConfirmDel(m.id)} className="absolute top-4 right-4 text-red-400 opacity-0 group-hover:opacity-100"><Trash2 size={16}/></button>
                 <div className="text-xs bg-blue-500/10 text-blue-500 font-bold px-3 py-1.5 rounded inline-block mb-3">{sub?.name}</div>
                 <h4 className="font-black text-lg">{m.title}</h4>
                 <p className={`text-sm my-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m.description}</p>
@@ -1266,67 +1280,198 @@ function TeacherMaterials({ subjects, materials, setMaterials, dbUrl, showToast,
          })}
          {filteredMaterials.length === 0 && <div className={`col-span-full text-center py-12 rounded-2xl border font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ไม่พบใบงานที่ค้นหา</div>}
        </div>
-       <ConfirmModal isOpen={!!deleteId} title="ลบเอกสาร/สื่อการเรียน" message="ยืนยันการลบเอกสารนี้หรือไม่?" onConfirm={confirmDelete} onCancel={() => setDeleteId(null)} isDark={isDark} />
     </div>
   );
 }
 
-function TeacherAssignments({ assignments, setAssignments, subjects, showToast, theme }) {
+function TeacherAssignments({ assignments, setAssignments, subjects, showToast, theme, getUniqueRooms, dbUrl }) {
   const [showForm, setShowForm] = useState(false);
-  const [newAsg, setNewAsg] = useState({ subjectId: subjects[0]?.id || '', title: '', description: '', maxScore: 10, dueDate: '' });
+  const [newAsg, setNewAsg] = useState({ subjectId: subjects[0]?.id || '', title: '', description: '', maxScore: 10, dueDate: '', targetRoom: 'all', linkUrl: '' });
+  const [imageFile, setImageFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  
+  const [editAsg, setEditAsg] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+  
   const isDark = theme === 'dark';
 
-  const handleCreate = (e) => {
+  const handleCreate = async (e) => {
     e.preventDefault();
     if(!newAsg.subjectId) return showToast('กรุณาสร้างวิชาเรียนก่อน');
-    setAssignments([...assignments, { ...newAsg, id: `a${Date.now()}` }]);
+
+    let uploadedImageUrl = '';
+    if (imageFile) {
+      if (!dbUrl) return showToast('กรุณาตั้งค่า Database URL เพื่ออัปโหลดรูปภาพ');
+      setIsUploading(true);
+      try {
+        const reader = new FileReader();
+        reader.readAsDataURL(imageFile);
+        await new Promise((resolve) => {
+          reader.onload = async () => {
+            const base64 = reader.result.split(',')[1];
+            const payload = { action: 'uploadAssignmentImg', filename: `asg_${Date.now()}_${imageFile.name}`, mimeType: imageFile.type, fileData: base64 };
+            const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
+            const data = await res.json();
+            if (data.url) uploadedImageUrl = data.url;
+            resolve();
+          };
+        });
+      } catch (error) {
+        showToast('อัปโหลดรูปภาพล้มเหลว งานจะถูกสร้างโดยไม่มีรูปประกอบ');
+      } finally {
+        setIsUploading(false);
+      }
+    }
+
+    setAssignments([{ ...newAsg, id: `a${Date.now()}`, imageUrl: uploadedImageUrl }, ...assignments]);
     setShowForm(false); showToast('สร้างงานใหม่สำเร็จ');
-    setNewAsg({ ...newAsg, title: '', description: '', maxScore: 10 });
+    setNewAsg({ subjectId: subjects[0]?.id || '', title: '', description: '', maxScore: 10, dueDate: '', targetRoom: 'all', linkUrl: '' });
+    setImageFile(null);
   };
-  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`;
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    
+    let uploadedImageUrl = editAsg.imageUrl || '';
+    if (imageFile) {
+      if (!dbUrl) return showToast('กรุณาตั้งค่า Database URL เพื่ออัปโหลดรูปภาพ');
+      setIsUploading(true);
+      try {
+        const reader = new FileReader();
+        reader.readAsDataURL(imageFile);
+        await new Promise((resolve) => {
+          reader.onload = async () => {
+            const base64 = reader.result.split(',')[1];
+            const payload = { action: 'uploadAssignmentImg', filename: `asg_${Date.now()}_${imageFile.name}`, mimeType: imageFile.type, fileData: base64 };
+            const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
+            const data = await res.json();
+            if (data.url) uploadedImageUrl = data.url;
+            resolve();
+          };
+        });
+      } catch (error) {
+        showToast('อัปโหลดรูปภาพล้มเหลว งานจะถูกอัปเดตโดยไม่มีรูปใหม่');
+      } finally {
+        setIsUploading(false);
+      }
+    }
+
+    setAssignments(assignments.map(a => a.id === editAsg.id ? { ...editAsg, imageUrl: uploadedImageUrl } : a));
+    setEditAsg(null);
+    setImageFile(null);
+    showToast('แก้ไขงานสำเร็จ');
+  };
+
+  const executeDelete = () => {
+    setAssignments(assignments.filter(a => a.id !== confirmDel));
+    setConfirmDel(null);
+    showToast('ลบงานเรียบร้อยแล้ว');
+  };
+
+  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 border font-bold ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-6">
+      
+      <ConfirmModal isOpen={!!confirmDel} title="ยืนยันการลบงาน" message="คุณต้องการลบงานนี้ใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้" onConfirm={executeDelete} onCancel={() => setConfirmDel(null)} theme={theme} />
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3"><BookOpen className="mr-2 text-blue-500"/> จัดการงานเก็บคะแนน</h2>
-        <button onClick={() => setShowForm(!showForm)} className="flex items-center px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold shadow-md"><Plus size={16} className="mr-2" /> สร้างงานใหม่</button>
+        <button onClick={() => {setShowForm(!showForm); setEditAsg(null);}} className="flex items-center px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors"><Plus size={16} className="mr-2" /> สร้างงานใหม่</button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleCreate} className={`p-8 rounded-3xl shadow-sm grid grid-cols-1 md:grid-cols-2 gap-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <div className="md:col-span-2">
-              <label className="block text-sm font-bold mb-2">เลือกวิชา</label>
-              <select required value={newAsg.subjectId} onChange={e => setNewAsg({...newAsg, subjectId: e.target.value})} className={inputClass}>
+      {(showForm || editAsg) && (
+        <form onSubmit={editAsg ? handleSaveEdit : handleCreate} className={`p-8 rounded-3xl shadow-sm grid grid-cols-1 md:grid-cols-2 gap-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            
+            <div className="md:col-span-2 flex justify-between items-center mb-2">
+              <h3 className="text-xl font-black text-blue-500">{editAsg ? 'แก้ไขงาน' : 'สร้างงานใหม่'}</h3>
+              {editAsg && <button type="button" onClick={() => setEditAsg(null)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>}
+            </div>
+
+            {/* Form Fields */}
+            <div>
+              <label className="block text-sm font-bold mb-2">เลือกวิชา *</label>
+              <select required value={editAsg ? editAsg.subjectId : newAsg.subjectId} onChange={e => editAsg ? setEditAsg({...editAsg, subjectId: e.target.value}) : setNewAsg({...newAsg, subjectId: e.target.value})} className={inputClass}>
                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
-            <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">ชื่องาน</label><input required type="text" value={newAsg.title} onChange={e => setNewAsg({...newAsg, title: e.target.value})} className={inputClass} /></div>
-            <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">คำสั่ง</label><textarea required value={newAsg.description} onChange={e => setNewAsg({...newAsg, description: e.target.value})} className={`${inputClass} h-24`} /></div>
-            <div><label className="block text-sm font-bold mb-2">คะแนนเต็ม</label><input required type="number" min="1" value={newAsg.maxScore} onChange={e => setNewAsg({...newAsg, maxScore: parseInt(e.target.value)})} className={inputClass} /></div>
-            <div><label className="block text-sm font-bold mb-2">กำหนดส่ง</label><input required type="date" value={newAsg.dueDate} onChange={e => setNewAsg({...newAsg, dueDate: e.target.value})} className={inputClass} /></div>
-            <div className="md:col-span-2 flex justify-end mt-2"><button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md">บันทึกงาน</button></div>
+            <div>
+              <label className="block text-sm font-bold mb-2 flex items-center text-emerald-600 dark:text-emerald-500"><Users size={16} className="mr-1.5"/> มอบหมายเฉพาะห้องเรียน</label>
+              <select value={editAsg ? editAsg.targetRoom : newAsg.targetRoom} onChange={e => editAsg ? setEditAsg({...editAsg, targetRoom: e.target.value}) : setNewAsg({...newAsg, targetRoom: e.target.value})} className={inputClass}>
+                <option value="all">ทุกห้องที่เรียนวิชานี้ (เห็นทุกคน)</option>
+                {getUniqueRooms().map(r => <option key={r} value={r}>ห้อง {r}</option>)}
+              </select>
+            </div>
+            
+            <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">ชื่องาน *</label><input required type="text" value={editAsg ? editAsg.title : newAsg.title} onChange={e => editAsg ? setEditAsg({...editAsg, title: e.target.value}) : setNewAsg({...newAsg, title: e.target.value})} className={inputClass} placeholder="เช่น ใบงานที่ 1.1 / ส่งสมุด..." /></div>
+            <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">คำสั่ง / รายละเอียด *</label><textarea required value={editAsg ? editAsg.description : newAsg.description} onChange={e => editAsg ? setEditAsg({...editAsg, description: e.target.value}) : setNewAsg({...newAsg, description: e.target.value})} className={`${inputClass} h-24`} placeholder="อธิบายสิ่งที่นักเรียนต้องทำ..." /></div>
+            
+            <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-5 pt-4 border-t border-dashed border-slate-300 dark:border-slate-600">
+              <div>
+                <label className="block text-sm font-bold mb-2 flex items-center"><ExternalLink size={16} className="mr-2 text-indigo-500"/> แนบลิงก์เพิ่มเติม (ถ้ามี)</label>
+                <input type="text" value={editAsg ? (editAsg.linkUrl || '') : newAsg.linkUrl} onChange={e => editAsg ? setEditAsg({...editAsg, linkUrl: e.target.value}) : setNewAsg({...newAsg, linkUrl: e.target.value})} className={inputClass} placeholder="เช่น https://youtube.com/..." />
+              </div>
+              <div>
+                <label className="block text-sm font-bold mb-2 flex items-center"><ImageIcon size={16} className="mr-2 text-pink-500"/> แนบรูปภาพใหม่ (แทนที่รูปเดิม)</label>
+                <div className={`border-2 border-dashed rounded-xl p-3 text-center relative cursor-pointer transition-colors ${isDark ? 'border-slate-600 bg-slate-900/50 hover:border-pink-500' : 'border-slate-300 bg-slate-50 hover:border-pink-500'}`}>
+                   <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                   <span className={`text-sm font-bold ${imageFile ? 'text-pink-500' : (isDark ? 'text-slate-400' : 'text-slate-500')}`}>{imageFile ? imageFile.name : 'คลิกเพื่อเลือกไฟล์รูปภาพ'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div><label className="block text-sm font-bold mb-2">คะแนนเต็ม *</label><input required type="number" min="1" value={editAsg ? editAsg.maxScore : newAsg.maxScore} onChange={e => editAsg ? setEditAsg({...editAsg, maxScore: parseInt(e.target.value)}) : setNewAsg({...newAsg, maxScore: parseInt(e.target.value)})} className={inputClass} /></div>
+            <div><label className="block text-sm font-bold mb-2">กำหนดส่ง *</label><input required type="date" value={editAsg ? editAsg.dueDate : newAsg.dueDate} onChange={e => editAsg ? setEditAsg({...editAsg, dueDate: e.target.value}) : setNewAsg({...newAsg, dueDate: e.target.value})} className={inputClass} /></div>
+            <div className="md:col-span-2 flex justify-end mt-4">
+              <button type="submit" disabled={isUploading} className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md flex items-center disabled:opacity-50">
+                {isUploading ? <><RefreshCw size={18} className="mr-2 animate-spin"/> กำลังอัปโหลด...</> : (editAsg ? 'บันทึกการแก้ไข' : 'บันทึกงานเก็บคะแนน')}
+              </button>
+            </div>
         </form>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="space-y-5">
         {assignments.map(asg => {
           const sub = subjects.find(s => s.id === asg.subjectId);
           return (
-            <div key={asg.id} className={`p-6 rounded-3xl shadow-sm border flex flex-col justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              <div>
-                <div className="flex justify-between items-start mb-4 gap-2">
-                  <h3 className="text-xl font-black">{asg.title}</h3>
-                  <span className="text-xs font-bold bg-blue-500/10 text-blue-500 px-3 py-1.5 rounded-lg shrink-0">{sub?.name}</span>
-                </div>
-                <p className={`text-sm mb-5 p-4 rounded-xl font-medium border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-100 text-slate-600'}`}>{asg.description}</p>
+            <div key={asg.id} className={`p-6 rounded-3xl shadow-sm border flex flex-col md:flex-row gap-6 relative group ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              
+              <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                 <button onClick={() => {setEditAsg(asg); setShowForm(false); window.scrollTo(0, 0);}} className={`p-2 rounded-lg transition-colors text-amber-500 shadow-sm ${isDark ? 'bg-slate-700 hover:bg-slate-600' : 'bg-white hover:bg-slate-50 border border-slate-200'}`} title="แก้ไขงาน"><Edit size={16}/></button>
+                 <button onClick={() => setConfirmDel(asg.id)} className={`p-2 rounded-lg transition-colors text-red-500 shadow-sm ${isDark ? 'bg-slate-700 hover:bg-slate-600' : 'bg-white hover:bg-slate-50 border border-slate-200'}`} title="ลบงาน"><Trash2 size={16}/></button>
               </div>
-              <div className={`flex flex-wrap gap-2 text-xs font-bold pt-4 border-t ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
-                <span className={`px-4 py-2 rounded-lg shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>เต็ม: {asg.maxScore}</span>
-                <span className={`px-4 py-2 rounded-lg shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>กำหนดส่ง: {asg.dueDate}</span>
+
+              {asg.imageUrl && (
+                <div className="w-full md:w-56 h-40 shrink-0 rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
+                  <img src={getValidImgUrl(asg.imageUrl)} alt="Assignment" className="w-full h-full object-cover"/>
+                </div>
+              )}
+              <div className="flex-1 flex flex-col justify-between">
+                <div>
+                  <div className="flex flex-col sm:flex-row justify-between items-start mb-4 gap-3 pr-20">
+                    <h3 className="text-xl font-black text-blue-600 dark:text-blue-400 leading-tight">{asg.title}</h3>
+                    <div className="flex flex-wrap gap-2 shrink-0">
+                      <span className="text-xs font-bold bg-blue-500/10 text-blue-500 px-3 py-1.5 rounded-lg">{sub?.name}</span>
+                      {asg.targetRoom && asg.targetRoom !== 'all' && <span className="text-xs font-bold bg-emerald-500 text-white px-3 py-1.5 rounded-lg shadow-sm">เฉพาะห้อง {asg.targetRoom}</span>}
+                    </div>
+                  </div>
+                  <p className={`text-sm mb-5 p-4 rounded-xl font-medium border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-100 text-slate-600'}`}>{asg.description}</p>
+                  
+                  {asg.linkUrl && (
+                    <div className="mb-5">
+                       <a href={asg.linkUrl.startsWith('http') ? asg.linkUrl : `https://${asg.linkUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><ExternalLink size={14} className="mr-2"/> เปิดลิงก์แนบ</a>
+                    </div>
+                  )}
+                </div>
+                <div className={`flex flex-wrap gap-2 text-xs font-bold pt-4 border-t mt-auto ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
+                  <span className={`px-4 py-2 rounded-lg shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}><BarChart2 size={12} className="inline mr-1 text-emerald-500"/> เต็ม: {asg.maxScore}</span>
+                  <span className={`px-4 py-2 rounded-lg shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}><Clock size={12} className="inline mr-1 text-amber-500"/> กำหนดส่ง: {asg.dueDate}</span>
+                </div>
               </div>
             </div>
           );
         })}
+        {assignments.length === 0 && <div className={`text-center py-16 rounded-3xl border font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีการสร้างงานเก็บคะแนน</div>}
       </div>
     </div>
   );
@@ -1731,6 +1876,9 @@ function TeacherProfile({ teacherProfile, setTeacherProfile, dbUrl, setDbUrl, sh
   );
 }
 
+// ==========================================
+// STUDENT VIEWS
+// ==========================================
 function StudentView(props) {
   switch(props.activeTab) {
     case 'dashboard': return <StudentDashboard {...props} />;
@@ -1871,7 +2019,12 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
   const [filterSub, setFilterSub] = useState('all');
   const isDark = theme === 'dark';
 
-  const filteredAsgs = filterSub === 'all' ? assignments : assignments.filter(a => a.subjectId === filterSub);
+  const validAssignments = assignments.filter(a => {
+    if (a.targetRoom && a.targetRoom !== 'all' && String(a.targetRoom).trim() !== String(student.room).trim()) return false;
+    return true;
+  });
+
+  const filteredAsgs = filterSub === 'all' ? validAssignments : validAssignments.filter(a => a.subjectId === filterSub);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1910,7 +2063,7 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
   const selectClass = `font-bold rounded-xl p-3 outline-none border focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 relative">
+    <div className="max-w-6xl mx-auto space-y-6 relative">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <h3 className="text-2xl font-black border-l-4 border-blue-500 pl-4">งานที่ต้องส่ง</h3>
         <select value={filterSub} onChange={e => setFilterSub(e.target.value)} className={selectClass}><option value="all">ทุกวิชา</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
@@ -1921,32 +2074,51 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
           const subObj = subjects.find(s => s.id === asg.subjectId);
           const sub = submissions.find(s => s.assignmentId === asg.id && s.studentId === student.id);
           return (
-            <div key={asg.id} className={`rounded-3xl p-6 shadow-sm flex flex-col md:flex-row justify-between gap-6 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              <div className="flex-1">
-                <span className="text-xs font-bold bg-blue-500/10 text-blue-500 px-3 py-1.5 rounded-lg mb-3 inline-block">{subObj?.name}</span>
-                <h4 className="text-2xl font-black mb-3">{asg.title}</h4>
-                <p className={`text-sm font-bold mb-5 p-4 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-100 text-slate-600'}`}>{asg.description}</p>
-                <div className="flex flex-wrap gap-3">
+            <div key={asg.id} className={`rounded-3xl p-6 shadow-sm flex flex-col lg:flex-row justify-between gap-6 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              
+              {asg.imageUrl && (
+                <div className="w-full lg:w-56 h-48 lg:h-40 shrink-0 rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
+                  <img src={getValidImgUrl(asg.imageUrl)} alt="Assignment" className="w-full h-full object-cover"/>
+                </div>
+              )}
+              
+              <div className="flex-1 flex flex-col">
+                <span className="text-xs font-bold bg-blue-500/10 text-blue-500 px-3 py-1.5 rounded-lg mb-3 self-start">{subObj?.name}</span>
+                <h4 className="text-2xl font-black mb-3 text-blue-600 dark:text-blue-400">{asg.title}</h4>
+                <p className={`text-sm font-bold mb-5 p-4 rounded-xl border flex-1 ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-100 text-slate-600'}`}>{asg.description}</p>
+                
+                <div className="mb-5 flex flex-wrap gap-2">
+                  {asg.linkUrl && (
+                     <a href={asg.linkUrl.startsWith('http') ? asg.linkUrl : `https://${asg.linkUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><ExternalLink size={14} className="mr-2"/> เปิดลิงก์ที่ครูแนบไว้</a>
+                  )}
+                  {asg.imageUrl && (
+                     <a href={asg.imageUrl} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-pink-500 hover:bg-pink-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><DownloadCloud size={14} className="mr-2"/> เปิดดู/โหลดไฟล์แนบ</a>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-3 mt-auto">
                   <span className={`text-xs font-bold px-4 py-2 rounded-xl flex items-center shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}><Clock size={14} className="mr-2 text-amber-500"/> กำหนดส่ง: {asg.dueDate}</span>
                   <span className={`text-xs font-bold px-4 py-2 rounded-xl flex items-center shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}><BarChart2 size={14} className="mr-2 text-emerald-500"/> เต็ม: {asg.maxScore}</span>
                 </div>
               </div>
-              <div className={`flex flex-col justify-center min-w-[160px] border-t md:border-t-0 md:border-l pt-5 md:pt-0 md:pl-6 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+
+              <div className={`flex flex-col justify-center min-w-[200px] border-t lg:border-t-0 lg:border-l pt-5 lg:pt-0 lg:pl-6 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                 {sub ? (
                   sub.status === 'graded' ? (
                      <div className="text-center w-full">
                         <div className="text-xs font-bold text-emerald-500 mb-2 uppercase tracking-wide">ตรวจแล้ว</div>
-                        <div className="text-3xl font-black text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-5 py-4 rounded-2xl">{sub.score} <span className="text-base font-bold opacity-50">/ {asg.maxScore}</span></div>
+                        <div className="text-4xl font-black text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-5 py-4 rounded-2xl">{sub.score} <span className="text-base font-bold opacity-50">/ {asg.maxScore}</span></div>
                         {sub.penalty > 0 && <div className="text-xs font-bold text-red-500 mt-2">หักคะแนนส่งช้า -{sub.penalty}</div>}
                      </div>
-                  ) : (<div className="w-full px-5 py-4 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-2xl text-sm font-black flex items-center justify-center"><Clock size={18} className="mr-2" /> ส่งแล้ว รอตรวจ</div>)
+                  ) : (<div className="w-full px-5 py-6 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-2xl text-base font-black flex items-center justify-center"><Clock size={20} className="mr-2" /> ส่งแล้ว รอตรวจ</div>)
                 ) : (
-                  <button onClick={() => { setSelectedAsg(asg); setSubmitMode('file'); }} className="w-full px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold shadow-md transition-all text-lg">ส่งงานนี้</button>
+                  <button onClick={() => { setSelectedAsg(asg); setSubmitMode('file'); }} className="w-full px-8 py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold shadow-md transition-all text-lg flex justify-center items-center"><Upload size={18} className="mr-2"/> ส่งงานนี้</button>
                 )}
               </div>
             </div>
           );
         })}
+        {filteredAsgs.length === 0 && <div className={`text-center py-16 rounded-3xl border font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>เย่! ไม่มีงานที่ต้องส่งในขณะนี้</div>}
       </div>
 
       {selectedAsg && (
@@ -2087,10 +2259,14 @@ function StudentProfile({ student, students, setStudents, showToast, dbUrl, them
 
   const handleChangePwd = (e) => {
     e.preventDefault();
-    if(pwdForm.old !== student.password) return showToast('รหัสผ่านเดิมไม่ถูกต้อง');
-    if(pwdForm.new !== pwdForm.confirm) return showToast('รหัสผ่านใหม่ไม่ตรงกัน');
+    const currentPwd = student.password ? String(student.password) : '12345678';
+    
+    if (pwdForm.old !== currentPwd) return showToast('รหัสผ่านเดิมไม่ถูกต้อง');
+    if (pwdForm.new !== pwdForm.confirm) return showToast('รหัสผ่านใหม่ไม่ตรงกัน');
+    
     setStudents(students.map(s => s.id === student.id ? { ...s, password: pwdForm.new } : s));
-    showToast('เปลี่ยนรหัสผ่านสำเร็จ'); setPwdForm({ old: '', new: '', confirm: '' });
+    showToast('เปลี่ยนรหัสผ่านสำเร็จ'); 
+    setPwdForm({ old: '', new: '', confirm: '' });
   };
 
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
@@ -2106,13 +2282,7 @@ function StudentProfile({ student, students, setStudents, showToast, dbUrl, them
          <h3 className="text-2xl font-black mt-4 relative z-10">{student.name}</h3>
          <p className="text-blue-500 font-bold text-sm relative z-10 mb-2">รหัส {student.id} | ห้อง {student.room} | เลขที่ {student.number}</p>
          <p className={`text-xs font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>* ไม่สามารถเปลี่ยนข้อมูลส่วนตัวได้ หากต้องการแก้ไขโปรดติดต่อคุณครู</p>
-         
-         <div className="mt-6">
-           <label className="cursor-pointer inline-flex items-center px-6 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow-md transition-colors">
-             <Camera size={18} className="mr-2" /> เปลี่ยนรูปประจำตัว
-             <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
-           </label>
-         </div>
+         <div className="mt-6"><label className="cursor-pointer inline-flex items-center px-6 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow-md transition-colors"><Camera size={18} className="mr-2" /> เปลี่ยนรูปประจำตัว<input type="file" accept="image/*" onChange={handleImageChange} className="hidden" /></label></div>
        </div>
 
        <form onSubmit={handleChangePwd} className={`rounded-3xl p-8 shadow-sm space-y-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
