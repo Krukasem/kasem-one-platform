@@ -713,6 +713,7 @@ function TeacherSubjects({ subjects, setSubjects, showToast, theme }) {
 function TeacherStudents({ subjects, students, setStudents, enrollments, setEnrollments, saveState, showToast, theme }) {
   const [filterSub, setFilterSub] = useState('all');
   const [filterRoom, setFilterRoom] = useState('all');
+  const [filterSection, setFilterSection] = useState('all');
   const [showImport, setShowImport] = useState(false);
   const [showAddSingle, setShowAddSingle] = useState(false);
   const [showBatchEnroll, setShowBatchEnroll] = useState(false);
@@ -730,8 +731,13 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
 
   const enrolledStudentIds = filterSub === 'all' ? students.map(s => String(s.id).trim()) : enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
-  const targetStudents = students.filter(s => enrolledStudentIds.includes(String(s.id).trim())).filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim());
-  const dynamicRooms = [...new Set(students.map(s => String(s.room || '').trim()))].sort();
+  const enrolledSts = students.filter(s => enrolledStudentIds.includes(String(s.id).trim()));
+  const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
+  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+
+  const targetStudents = enrolledSts
+    .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
+    .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
 
   const handleBulkImport = () => {
     if (!importSub) return showToast('เลือกวิชาก่อนนำเข้า');
@@ -833,8 +839,9 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
         <div className={`p-5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
           <h2 className="text-lg font-black flex items-center"><Users className="mr-2 text-blue-500" size={20} /> ทะเบียนนักเรียน</h2>
           <div className="flex gap-2 flex-wrap w-full lg:w-auto">
-            <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterRoom('all');}} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกวิชา</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-            <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
+            <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกวิชา</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+            <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
+            <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกตอน</option>{dynamicSections.map(sec => <option key={sec} value={sec}>ตอน {sec}</option>)}</select>
             <button onClick={() => {setShowBatchEnroll(!showBatchEnroll); setShowAddSingle(false); setShowImport(false);}} className={`px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all`}><Layers size={16} className="inline mr-1"/> ลงทะเบียนทั้งห้อง</button>
             <button onClick={() => {setShowAddSingle(!showAddSingle); setShowBatchEnroll(false); setShowImport(false);}} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold"><User size={16} className="inline mr-1" /> เพิ่มทีละคน</button>
             <button onClick={() => {setShowImport(!showImport); setShowAddSingle(false); setShowBatchEnroll(false);}} className={`px-4 py-2.5 rounded-xl font-bold border ${isDark ? 'bg-slate-700 border-slate-600 text-white hover:bg-slate-600' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}><ClipboardPaste size={16} className="inline mr-1" /> นำเข้า Excel</button>
@@ -877,7 +884,7 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm min-w-[700px]">
             <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-              <tr><th className="p-4 text-center">รูป</th><th className="p-4">รหัส</th><th className="p-4">ชื่อ-สกุล</th><th className="p-4">เลขที่/ห้อง</th><th className="p-4 text-center">ใช้งานล่าสุด</th><th className="p-4 text-center">จัดการ</th></tr>
+              <tr><th className="p-4 text-center">รูป</th><th className="p-4">รหัส</th><th className="p-4">ชื่อ-สกุล</th><th className="p-4">เลขที่/ห้อง/ตอน</th><th className="p-4 text-center">ใช้งานล่าสุด</th><th className="p-4 text-center">จัดการ</th></tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {targetStudents.map(s => (
@@ -887,7 +894,7 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
                   </div></td>
                   <td className="p-4 font-mono font-bold text-blue-500">{s.id}</td>
                   <td className="p-4 font-bold">{s.name}</td>
-                  <td className="p-4 font-medium">{s.number} / {s.room}</td>
+                  <td className="p-4 font-medium">{s.number} / {s.room} {s.section && s.section !== '-' ? `(${s.section})` : ''}</td>
                   <td className={`p-4 text-center text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{s.lastLogin ? s.lastLogin : '-'}</td>
                   <td className="p-4 text-center">
                     <button onClick={() => openEdit(s)} className="text-amber-500 hover:text-amber-600 mr-3" title="แก้ไขข้อมูล/ลงทะเบียนวิชา"><Edit size={16}/></button>
@@ -939,6 +946,7 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
 function TeacherAttendance({ subjects, students, enrollments, attendance, setAttendance, showToast, theme }) {
   const [selectedSub, setSelectedSub] = useState(subjects[0]?.id || '');
   const [selectedRoom, setSelectedRoom] = useState('all');
+  const [selectedSection, setSelectedSection] = useState('all');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [tempStatus, setTempStatus] = useState({});
   const isDark = theme === 'dark';
@@ -946,7 +954,11 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
   const enrolledIds = enrollments.filter(e => e.subjectId === selectedSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
   const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const targetStudents = enrolledSts.filter(s => selectedRoom === 'all' || String(s.room || '').trim() === String(selectedRoom).trim());
+  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  
+  const targetStudents = enrolledSts
+    .filter(s => selectedRoom === 'all' || String(s.room || '').trim() === String(selectedRoom).trim())
+    .filter(s => selectedSection === 'all' || String(s.section || '').trim() === String(selectedSection).trim());
 
   useEffect(() => {
     let initialStatus = {};
@@ -987,8 +999,9 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
       </div>
       
       <div className={`p-6 rounded-3xl flex flex-wrap gap-4 items-end shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-        <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={selectedSub} onChange={e=>{setSelectedSub(e.target.value); setSelectedRoom('all');}} className={inputClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-        <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={selectedRoom} onChange={e=>setSelectedRoom(e.target.value)} className={inputClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
+        <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={selectedSub} onChange={e=>{setSelectedSub(e.target.value); setSelectedRoom('all'); setSelectedSection('all');}} className={inputClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={selectedRoom} onChange={e=>{setSelectedRoom(e.target.value); setSelectedSection('all');}} className={inputClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={selectedSection} onChange={e=>setSelectedSection(e.target.value)} className={inputClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec=><option key={sec} value={sec}>ตอน {sec}</option>)}</select></div>
         <div><label className="block text-sm font-bold mb-2">วันที่</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} className={inputClass} /></div>
       </div>
 
@@ -999,12 +1012,12 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm min-w-[600px]">
             <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-              <tr><th className="p-4 w-16 text-center">ห้อง</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">สถานะการมาเรียน</th></tr>
+              <tr><th className="p-4 w-16 text-center">ห้อง/ตอน</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">สถานะการมาเรียน</th></tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {targetStudents.map(s => (
                 <tr key={s.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/50'}`}>
-                  <td className="p-4 text-center font-bold text-slate-500">{s.room}</td><td className="p-4 text-center font-bold">{s.number}</td>
+                  <td className="p-4 text-center font-bold text-slate-500">{s.room}{s.section && s.section !== '-' ? `(${s.section})` : ''}</td><td className="p-4 text-center font-bold">{s.number}</td>
                   <td className="p-4 font-bold"><span className="text-blue-500 mr-2 font-mono">{s.id}</span>{s.name}</td>
                   <td className="p-4">
                     <div className="flex justify-center gap-2">
@@ -1028,13 +1041,19 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
 function TeacherAttendanceSummary({ subjects, students, enrollments, attendance, theme, showToast }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterRoom, setFilterRoom] = useState('all');
+  const [filterSection, setFilterSection] = useState('all');
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7)); 
   const isDark = theme === 'dark';
 
   const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
   const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const targetStudents = enrolledSts.filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim());
+  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  
+  const targetStudents = enrolledSts
+    .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
+    .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
+  
   const subObj = subjects.find(s => s.id === filterSub);
 
   const allDatesInMonth = [...new Set(attendance.filter(a => a.subjectId === filterSub && a.date.startsWith(filterMonth)).map(a => a.date))].sort();
@@ -1082,8 +1101,9 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
     <div className="max-w-full mx-auto space-y-6 flex flex-col h-[calc(100vh-100px)]">
       <div className={`p-5 rounded-3xl flex flex-wrap gap-4 items-center justify-between shadow-sm shrink-0 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
          <div className="flex gap-4 w-full md:w-auto items-end flex-wrap">
-           <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={filterSub} onChange={e=>{setFilterSub(e.target.value); setFilterRoom('all');}} className={`w-full ${selectClass}`}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-           <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={filterRoom} onChange={e=>setFilterRoom(e.target.value)} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
+           <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={filterSub} onChange={e=>{setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={`w-full ${selectClass}`}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+           <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={filterRoom} onChange={e=>{setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
+           <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={filterSection} onChange={e=>setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec=><option key={sec} value={sec}>ตอน {sec}</option>)}</select></div>
            <div><label className="block text-sm font-bold mb-2">เดือน</label><input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className={selectClass} /></div>
          </div>
          <button onClick={handleExportAttendance} className="flex items-center px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md w-full md:w-auto justify-center transition-colors"><DownloadCloud size={18} className="mr-2" /> ส่งออก Excel</button>
@@ -1094,7 +1114,7 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
           <table className="w-full text-left text-sm min-w-max border-collapse">
             <thead className={`font-bold sticky top-0 z-10 border-b shadow-sm ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
               <tr>
-                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ห้อง</th><th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>เลขที่</th><th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รหัส / ชื่อ-สกุล</th>
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ห้อง/ตอน</th><th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>เลขที่</th><th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รหัส / ชื่อ-สกุล</th>
                 {allDatesInMonth.map(d => (<th key={d} className={`p-2 text-center border-r text-xs whitespace-nowrap ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`}>{d.split('-')[2]}/{d.split('-')[1]}</th>))}
                 {allDatesInMonth.length === 0 && <th className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ไม่มีข้อมูลในเดือนนี้</th>}
                 <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-green-900/20 text-green-400' : 'border-slate-200 bg-green-50 text-green-700'}`}>มา</th>
@@ -1108,7 +1128,7 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
                 let counts = { present: 0, late: 0, leave: 0, absent: 0 };
                 return (
                   <tr key={stu.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/40'}`}>
-                    <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.room}</td>
+                    <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.room}{stu.section && stu.section !== '-' ? `(${stu.section})` : ''}</td>
                     <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.number}</td>
                     <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><span className="text-blue-500 mr-2 font-mono">{stu.id}</span>{stu.name}</td>
                     {allDatesInMonth.map(date => {
@@ -1137,13 +1157,18 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
 function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehaviors, showToast, theme }) {
   const [selectedSub, setSelectedSub] = useState(subjects[0]?.id || '');
   const [selectedRoom, setSelectedRoom] = useState('all');
+  const [selectedSection, setSelectedSection] = useState('all');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const isDark = theme === 'dark';
 
   const enrolledIds = enrollments.filter(e => e.subjectId === selectedSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
   const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const targetStudents = enrolledSts.filter(s => selectedRoom === 'all' || String(s.room || '').trim() === String(selectedRoom).trim());
+  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  
+  const targetStudents = enrolledSts
+    .filter(s => selectedRoom === 'all' || String(s.room || '').trim() === String(selectedRoom).trim())
+    .filter(s => selectedSection === 'all' || String(s.section || '').trim() === String(selectedSection).trim());
 
   const handleSaveBehavior = (studentId) => {
     const ptsInput = document.getElementById(`beh-pts-${studentId}`);
@@ -1164,8 +1189,9 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
     <div className="max-w-6xl mx-auto space-y-6">
       <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3"><Award className="mr-2 text-blue-500"/> บันทึกพฤติกรรมนักเรียน</h2>
       <div className={`p-6 rounded-3xl flex flex-wrap gap-4 items-end shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-        <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={selectedSub} onChange={e=>{setSelectedSub(e.target.value); setSelectedRoom('all');}} className={inputClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-        <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={selectedRoom} onChange={e=>setSelectedRoom(e.target.value)} className={inputClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
+        <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={selectedSub} onChange={e=>{setSelectedSub(e.target.value); setSelectedRoom('all'); setSelectedSection('all');}} className={inputClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={selectedRoom} onChange={e=>{setSelectedRoom(e.target.value); setSelectedSection('all');}} className={inputClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={selectedSection} onChange={e=>setSelectedSection(e.target.value)} className={inputClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec=><option key={sec} value={sec}>ตอน {sec}</option>)}</select></div>
         <div><label className="block text-sm font-bold mb-2">วันที่</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} className={inputClass} /></div>
       </div>
 
@@ -1173,12 +1199,12 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm min-w-[800px]">
             <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-              <tr><th className="p-4 w-16 text-center">ห้อง</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4 w-64">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">บันทึกคะแนนพฤติกรรม และ หมายเหตุ</th></tr>
+              <tr><th className="p-4 w-16 text-center">ห้อง/ตอน</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4 w-64">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">บันทึกคะแนนพฤติกรรม และ หมายเหตุ</th></tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {targetStudents.map(s => (
                 <tr key={s.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/50'}`}>
-                  <td className="p-4 text-center font-bold text-slate-500">{s.room}</td>
+                  <td className="p-4 text-center font-bold text-slate-500">{s.room}{s.section && s.section !== '-' ? `(${s.section})` : ''}</td>
                   <td className="p-4 text-center font-bold">{s.number}</td>
                   <td className="p-4 font-bold"><span className="text-blue-500 mr-2 font-mono">{s.id}</span>{s.name}</td>
                   <td className="p-4">
@@ -1481,11 +1507,13 @@ function TeacherGrading({ assignments, submissions, setSubmissions, students, su
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterAsg, setFilterAsg] = useState('all');
   const [filterRoom, setFilterRoom] = useState('all');
+  const [filterSection, setFilterSection] = useState('all');
   const isDark = theme === 'dark';
 
   const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
   const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
+  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
   const availableAsgs = assignments.filter(a => a.subjectId === filterSub);
 
   const filteredSubs = submissions.filter(sub => {
@@ -1495,6 +1523,7 @@ function TeacherGrading({ assignments, submissions, setSubmissions, students, su
     if (filterSub && asg.subjectId !== filterSub) return false;
     if (filterAsg !== 'all' && asg.id !== filterAsg) return false;
     if (filterRoom !== 'all' && String(stu.room || '').trim() !== String(filterRoom).trim()) return false;
+    if (filterSection !== 'all' && String(stu.section || '').trim() !== String(filterSection).trim()) return false;
     return true;
   });
 
@@ -1520,9 +1549,10 @@ function TeacherGrading({ assignments, submissions, setSubmissions, students, su
       <div className={`p-5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b shrink-0 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50/50 border-slate-200'}`}>
         <h2 className="text-lg font-black flex items-center shrink-0"><CheckSquare className="mr-2 text-blue-500" size={20} /> ตรวจงานนักเรียน</h2>
         <div className="flex flex-wrap gap-3 w-full lg:w-auto">
-          <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterAsg('all'); setFilterRoom('all');}} className={selectClass}>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+          <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterAsg('all'); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
           <select value={filterAsg} onChange={e => setFilterAsg(e.target.value)} className={selectClass}><option value="all">ทุกงานในวิชานี้</option>{availableAsgs.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}</select>
-          <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
+          <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
+          <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec => <option key={sec} value={sec}>ตอน {sec}</option>)}</select>
         </div>
       </div>
       <div className={`p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1 ${isDark ? 'bg-slate-900/30' : 'bg-slate-50/30'}`}>
@@ -1537,7 +1567,7 @@ function TeacherGrading({ assignments, submissions, setSubmissions, students, su
                    {stu?.profileImg ? <img src={getValidImgUrl(stu.profileImg)} className="w-full h-full object-cover rounded-full"/> : <User size={20} className="text-slate-400"/>}
                  </div>
                  <div>
-                   <div className="flex flex-wrap items-center gap-2 mb-1"><span className="font-mono text-blue-500 font-bold">{stu?.id}</span><span className="font-black">{stu?.name}</span><span className={`text-xs px-2 py-0.5 rounded font-bold border ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>ห้อง {stu?.room}</span></div>
+                   <div className="flex flex-wrap items-center gap-2 mb-1"><span className="font-mono text-blue-500 font-bold">{stu?.id}</span><span className="font-black">{stu?.name}</span><span className={`text-xs px-2 py-0.5 rounded font-bold border ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>ห้อง {stu?.room}{stu?.section && stu.section !== '-' ? `(${stu?.section})` : ''}</span></div>
                    <div className={`text-sm font-bold flex flex-wrap gap-2 items-center ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                       <span>{asg?.title}</span> <span className="text-slate-500 font-medium ml-1">(เต็ม {asg?.maxScore})</span>
                       {isLate && <span className="text-xs text-white bg-red-500 px-2 py-1 rounded ml-2 font-bold animate-pulse inline-flex items-center"><AlertCircle size={12} className="mr-1"/> ส่งช้ากว่ากำหนด</span>}
@@ -1580,13 +1610,18 @@ function TeacherGrading({ assignments, submissions, setSubmissions, students, su
 function TeacherExams({ subjects, students, enrollments, exams, setExams, showToast, theme }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterRoom, setFilterRoom] = useState('all');
+  const [filterSection, setFilterSection] = useState('all');
   const [examType, setExamType] = useState('midterm');
   const isDark = theme === 'dark';
 
   const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
   const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const targetStudents = enrolledSts.filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim());
+  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  
+  const targetStudents = enrolledSts
+    .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
+    .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
 
   const subObj = subjects.find(s => s.id === filterSub);
   const maxScore = examType === 'midterm' ? (subObj?.midtermMax ?? 20) : (subObj?.finalMax ?? 30);
@@ -1633,8 +1668,9 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
   return (
     <div className="max-w-6xl mx-auto space-y-6">
        <div className={`p-6 rounded-3xl flex gap-4 shadow-sm items-end flex-wrap border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={filterSub} onChange={e=>{setFilterSub(e.target.value); setFilterRoom('all');}} className={selectClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-          <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={filterRoom} onChange={e=>setFilterRoom(e.target.value)} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
+          <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={filterSub} onChange={e=>{setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+          <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={filterRoom} onChange={e=>{setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
+          <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={filterSection} onChange={e=>setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec=><option key={sec} value={sec}>ตอน {sec}</option>)}</select></div>
        </div>
 
        <div className={`rounded-3xl overflow-hidden shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -1651,7 +1687,7 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
            <table className="w-full text-left text-sm min-w-[600px]">
              <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
                <tr>
-                 <th className="p-4 w-16 text-center">ห้อง</th>
+                 <th className="p-4 w-16 text-center">ห้อง/ตอน</th>
                  <th className="p-4 w-16 text-center">เลขที่</th>
                  <th className="p-4 w-24">รหัส</th>
                  <th className="p-4">ชื่อ-สกุล</th>
@@ -1664,7 +1700,7 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
                   const currentScore = examType === 'midterm' ? rec.midterm : rec.final;
                   return (
                      <tr key={s.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/50'}`}>
-                       <td className="p-4 text-center font-bold text-slate-500">{s.room}</td>
+                       <td className="p-4 text-center font-bold text-slate-500">{s.room}{s.section && s.section !== '-' ? `(${s.section})` : ''}</td>
                        <td className="p-4 text-center font-bold">{s.number}</td>
                        <td className="p-4 font-mono font-bold text-blue-500">{s.id}</td>
                        <td className="p-4 font-bold">{s.name}</td>
@@ -1686,6 +1722,7 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
 function TeacherSummary({ subjects, students, assignments, submissions, exams, behaviors, enrollments, showToast, theme }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterRoom, setFilterRoom] = useState('all');
+  const [filterSection, setFilterSection] = useState('all');
   const isDark = theme === 'dark';
 
   const subObj = subjects.find(s => s.id === filterSub);
@@ -1696,7 +1733,11 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
   const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
   const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const targetSts = enrolledSts.filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim());
+  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  
+  const targetSts = enrolledSts
+    .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
+    .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
 
   const matrix = targetSts.map(stu => {
     let asgTotal = 0;
@@ -1719,19 +1760,19 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
   const handleExport = () => {
     let csv = '\uFEFF'; 
     csv += `สรุปคะแนน วิชา ${subObj?.name} (${subObj?.code}) - เทอม ${subObj?.semester}/${subObj?.year}\n`;
-    csv += 'ห้อง,เลขที่,รหัส,ชื่อ-สกุล,';
+    csv += 'ห้อง,ตอน,เลขที่,รหัส,ชื่อ-สกุล,';
     targetAsgs.forEach(a => csv += `"${a.title} (${a.maxScore})",`);
     csv += `รวมงาน (${maxAsgTotal}),กลางภาค (${maxMid}),ปลายภาค (${maxFin}),รวมสุทธิ (${maxGrandTotal}),พฤติกรรม\n`;
 
     matrix.forEach(row => {
-      csv += `${row.room},${row.number},="${row.id}","${row.name}",`;
+      csv += `${row.room},${row.section || '-'},${row.number},="${row.id}","${row.name}",`;
       targetAsgs.forEach(a => csv += `${row.scores[a.id]},`);
       csv += `${row.asgTotal},${row.mid},${row.fin},${row.grandTotal},${row.behaviorTotal}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = `Score_${subObj?.code}_Room_${filterRoom}.csv`; link.click();
+    const link = document.createElement('a'); link.href = url; link.download = `Score_${subObj?.code}_Room_${filterRoom}${filterSection !== 'all' ? '_Sec_'+filterSection : ''}.csv`; link.click();
     showToast('ดาวน์โหลดไฟล์ Excel (.csv) สำเร็จ');
   };
 
@@ -1741,8 +1782,9 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
     <div className="max-w-full mx-auto space-y-6 flex flex-col h-[calc(100vh-100px)]">
       <div className={`p-5 rounded-3xl flex flex-wrap gap-4 items-center justify-between shadow-sm shrink-0 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
          <div className="flex gap-4 w-full md:w-auto">
-           <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterRoom('all');}} className={selectClass}><option value="">-- เลือกวิชา --</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-           <select value={filterRoom} onChange={e => setFilterRoom(e.target.value)} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
+           <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}><option value="">-- เลือกวิชา --</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+           <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
+           <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec => <option key={sec} value={sec}>ตอน {sec}</option>)}</select>
          </div>
          <button onClick={handleExport} className="flex items-center px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md w-full md:w-auto justify-center transition-colors"><DownloadCloud size={18} className="mr-2" /> ส่งออก Excel</button>
       </div>
@@ -1751,7 +1793,7 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
           <table className="w-full text-left text-sm min-w-max border-collapse">
             <thead className={`font-bold sticky top-0 z-10 border-b shadow-sm ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
               <tr>
-                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ห้อง</th>
+                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ห้อง/ตอน</th>
                 <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">เลขที่</th>
                 <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">รหัส / ชื่อ-สกุล</th>
                 <th className={`p-2 text-center border-r border-b ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`} colSpan={targetAsgs.length || 1}>คะแนนเก็บ (งาน)</th>
@@ -1769,7 +1811,7 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {matrix.map((row) => (
                 <tr key={row.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/40'}`}>
-                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.room}</td>
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.room}{row.section && row.section !== '-' ? `(${row.section})` : ''}</td>
                   <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.number}</td>
                   <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><span className="text-blue-500 mr-2 font-mono">{row.id}</span>{row.name}</td>
                   {targetAsgs.length === 0 && <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>-</td>}
