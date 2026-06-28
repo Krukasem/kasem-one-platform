@@ -55,7 +55,7 @@ function ConfirmModal({ isOpen, title, message, onConfirm, onCancel, theme }) {
         <p className={`text-sm font-bold mb-6 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{message}</p>
         <div className="flex gap-3">
           <button onClick={onCancel} className={`flex-1 py-3 rounded-xl font-bold transition-all ${isDark ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>ยกเลิก</button>
-          <button onClick={onConfirm} className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold shadow-md">ยืนยันการลบ</button>
+          <button onClick={onConfirm} className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold shadow-md">ยืนยัน</button>
         </div>
       </div>
     </div>
@@ -179,7 +179,9 @@ export default function App() {
     }
   };
 
-  const getUniqueRooms = () => [...new Set(students.map(s => s.room))].sort();
+  const getUniqueRooms = () => [...new Set(students.map(s => String(s.room || '').trim()))].filter(Boolean).sort();
+  const getUniqueSections = (roomId) => [...new Set(students.filter(s => String(s.room || '').trim() === String(roomId).trim()).map(s => String(s.section || '').trim()))].filter(Boolean).sort();
+
 
   const handleLoginSuccess = (userObj) => {
     if (userObj.role === 'student') {
@@ -223,7 +225,7 @@ export default function App() {
     announcements, setAnnouncements: (data) => saveState({announcements: data}),
     teacherProfile, setTeacherProfile: (data) => saveState({teacherProfile: data}),
     dbUrl, setDbUrl: (url) => { setDbUrl(url); safeSetItem('kasem_db_url', url); },
-    getUniqueRooms, showToast, setActiveTab, theme, setTheme, saveState 
+    getUniqueRooms, getUniqueSections, showToast, setActiveTab, theme, setTheme, saveState 
   };
 
   return (
@@ -472,12 +474,38 @@ function TeacherView(props) {
   }
 }
 
-function TeacherDashboard({ students, subjects, assignments, submissions, attendance, behaviors, theme }) {
+function TeacherDashboard({ students, subjects, assignments, submissions, attendance, behaviors, enrollments, exams, theme }) {
   const isDark = theme === 'dark';
   const today = new Date().toISOString().split('T')[0];
   const todayAtt = attendance.filter(a => a.date === today);
   const presentToday = todayAtt.filter(a => a.status === 'present').length;
   const totalBehaviors = behaviors.reduce((sum, b) => sum + b.points, 0);
+
+  // คำนวณนักเรียน Top 3 ของแต่ละวิชา
+  const topStudentsBySubject = subjects.map(sub => {
+     const enrolledIds = enrollments.filter(e => e.subjectId === sub.id).map(e => String(e.studentId).trim());
+     const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
+     const targetAsgs = assignments.filter(a => a.subjectId === sub.id);
+
+     const studentScores = enrolledSts.map(stu => {
+         let asgTotal = 0;
+         targetAsgs.forEach(asg => {
+             const subM = submissions.find(s => s.assignmentId === asg.id && String(s.studentId).trim() === String(stu.id).trim());
+             if (subM && subM.status === 'graded') {
+                 asgTotal += subM.score;
+             }
+         });
+         const examRec = exams.find(e => e.subjectId === sub.id && String(e.studentId).trim() === String(stu.id).trim()) || {};
+         const mid = examRec.midterm || 0;
+         const fin = examRec.final || 0;
+         const grandTotal = asgTotal + mid + fin;
+         return { ...stu, grandTotal };
+     });
+
+     // เรียงลำดับจากมากไปน้อย และดึงแค่ 3 อันดับแรก
+     const top3 = studentScores.sort((a, b) => b.grandTotal - a.grandTotal).slice(0, 3);
+     return { subject: sub, top3 };
+  });
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto animate-in fade-in">
@@ -489,6 +517,43 @@ function TeacherDashboard({ students, subjects, assignments, submissions, attend
         <StatCard title="งานรอตรวจ" value={submissions.filter(s => s.status === 'submitted').length} icon={<CheckSquare size={24} className="text-amber-500" />} bg={isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-amber-100'} theme={theme} />
         <StatCard title="มาเรียนวันนี้ (คน/ทั้งหมด)" value={todayAtt.length > 0 ? `${presentToday}/${todayAtt.length}` : '-'} icon={<Calendar size={24} className="text-pink-500" />} bg={isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-pink-100'} theme={theme} />
         <StatCard title="คะแนนพฤติกรรมสะสม" value={totalBehaviors > 0 ? `+${totalBehaviors}` : totalBehaviors} icon={<Award size={24} className="text-violet-500" />} bg={isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-violet-100'} theme={theme} />
+      </div>
+
+      <h2 className="text-xl font-black mt-10 mb-4 border-l-4 border-emerald-500 pl-4">Top 3 นักเรียนคะแนนรวมสูงสุด (แยกตามวิชา)</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        {topStudentsBySubject.map(({ subject, top3 }) => (
+           <div key={subject.id} className={`p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+             <h3 className="font-black text-lg mb-4 text-blue-600 dark:text-blue-400 flex items-center justify-between">
+               <span className="truncate pr-2">{subject.name}</span>
+               <span className="text-xs font-bold bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 px-2 py-1 rounded-md shrink-0">{subject.code}</span>
+             </h3>
+             {top3.length > 0 ? (
+               <div className="space-y-3">
+                 {top3.map((stu, index) => (
+                   <div key={stu.id} className={`flex items-center justify-between p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-slate-50 border-slate-100'}`}>
+                     <div className="flex items-center gap-3 overflow-hidden">
+                       <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm shrink-0 ${index === 0 ? 'bg-amber-100 text-amber-600 border-2 border-amber-400' : index === 1 ? 'bg-slate-200 text-slate-500 border-2 border-slate-300' : 'bg-orange-100 text-orange-600 border-2 border-orange-300'}`}>
+                         {index + 1}
+                       </div>
+                       <div className="flex flex-col min-w-0">
+                         <span className="font-bold text-sm truncate">{stu.name}</span>
+                         <span className={`text-xs font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>ห้อง {stu.room} | เลขที่ {stu.number}</span>
+                       </div>
+                     </div>
+                     <div className="font-black text-emerald-500 ml-2 shrink-0">{stu.grandTotal} <span className="text-[10px] text-slate-400 font-bold">คะแนน</span></div>
+                   </div>
+                 ))}
+               </div>
+             ) : (
+               <div className={`text-center py-8 text-sm font-bold border-2 border-dashed rounded-2xl ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                 ยังไม่มีข้อมูลคะแนน
+               </div>
+             )}
+           </div>
+        ))}
+        {topStudentsBySubject.length === 0 && (
+           <div className={`col-span-full text-center py-8 font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>ยังไม่มีวิชาเรียนในระบบ</div>
+        )}
       </div>
     </div>
   );
@@ -710,10 +775,11 @@ function TeacherSubjects({ subjects, setSubjects, showToast, theme }) {
   );
 }
 
-function TeacherStudents({ subjects, students, setStudents, enrollments, setEnrollments, saveState, showToast, theme }) {
+function TeacherStudents({ subjects, students, setStudents, enrollments, setEnrollments, assignments, submissions, behaviors, saveState, showToast, theme, getUniqueRooms, getUniqueSections }) {
   const [filterSub, setFilterSub] = useState('all');
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSection, setFilterSection] = useState('all');
+  
   const [showImport, setShowImport] = useState(false);
   const [showAddSingle, setShowAddSingle] = useState(false);
   const [showBatchEnroll, setShowBatchEnroll] = useState(false);
@@ -723,6 +789,7 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
   const [singleStu, setSingleStu] = useState({ id: '', name: '', number: '', section: '', room: '', subjectId: '' });
   const [editForm, setEditForm] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null); 
+  const [viewingStudent, setViewingStudent] = useState(null);
 
   const [batchSub, setBatchSub] = useState(subjects[0]?.id || '');
   const [batchRoom, setBatchRoom] = useState('');
@@ -731,13 +798,27 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
 
   const enrolledStudentIds = filterSub === 'all' ? students.map(s => String(s.id).trim()) : enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
-  const enrolledSts = students.filter(s => enrolledStudentIds.includes(String(s.id).trim()));
-  const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  const dynamicRooms = getUniqueRooms();
+  const dynamicSections = getUniqueSections(filterRoom);
 
-  const targetStudents = enrolledSts
-    .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
-    .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
+  const targetStudents = students
+      .filter(s => enrolledStudentIds.includes(String(s.id).trim()))
+      .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
+      .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
+
+  const handleExportExcel = () => {
+    let csv = '\uFEFF'; 
+    csv += 'รหัสประจำตัว,ชื่อ-สกุล,เลขที่,ห้อง,ตอน,เบอร์นักเรียน,เบอร์ผู้ปกครอง,ความสัมพันธ์\n';
+    
+    targetStudents.forEach(stu => {
+       csv += `="${stu.id}","${stu.name}",${stu.number},="${stu.room}","${stu.section || ''}","${stu.studentPhone || ''}","${stu.parentPhone || ''}","${stu.parentRelation || ''}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = url; link.download = `Student_Data_${filterRoom !== 'all' ? 'Room_'+filterRoom : 'All'}.csv`; link.click();
+    showToast('ดาวน์โหลดไฟล์ข้อมูลนักเรียนเรียบร้อยแล้ว');
+  };
 
   const handleBulkImport = () => {
     if (!importSub) return showToast('เลือกวิชาก่อนนำเข้า');
@@ -808,7 +889,8 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
      showToast('ลบนักเรียนออกจากระบบสำเร็จ');
   };
 
-  const openEdit = (s) => {
+  const openEdit = (e, s) => {
+    e.stopPropagation();
     const enrolledSubIds = enrollments.filter(e => String(e.studentId).trim() === String(s.id).trim()).map(e => e.subjectId);
     setEditForm({ ...s, enrolledSubjectIds: enrolledSubIds });
   };
@@ -837,14 +919,16 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
 
       <div className={`rounded-3xl overflow-hidden shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className={`p-5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
-          <h2 className="text-lg font-black flex items-center"><Users className="mr-2 text-blue-500" size={20} /> ทะเบียนนักเรียน</h2>
+          <h2 className="text-lg font-black flex items-center shrink-0"><Users className="mr-2 text-blue-500" size={20} /> ทะเบียนนักเรียน</h2>
           <div className="flex gap-2 flex-wrap w-full lg:w-auto">
             <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกวิชา</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
             <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
-            <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกตอน</option>{dynamicSections.map(sec => <option key={sec} value={sec}>ตอน {sec}</option>)}</select>
-            <button onClick={() => {setShowBatchEnroll(!showBatchEnroll); setShowAddSingle(false); setShowImport(false);}} className={`px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all`}><Layers size={16} className="inline mr-1"/> ลงทะเบียนทั้งห้อง</button>
-            <button onClick={() => {setShowAddSingle(!showAddSingle); setShowBatchEnroll(false); setShowImport(false);}} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold"><User size={16} className="inline mr-1" /> เพิ่มทีละคน</button>
-            <button onClick={() => {setShowImport(!showImport); setShowAddSingle(false); setShowBatchEnroll(false);}} className={`px-4 py-2.5 rounded-xl font-bold border ${isDark ? 'bg-slate-700 border-slate-600 text-white hover:bg-slate-600' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}><ClipboardPaste size={16} className="inline mr-1" /> นำเข้า Excel</button>
+            <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} disabled={filterRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s => <option key={s} value={s}>ตอน {s}</option>)}</select>
+            
+            <button onClick={handleExportExcel} className={`px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-all`} title="ส่งออก Excel เบอร์โทร"><DownloadCloud size={16} className="inline md:mr-1" /><span className="hidden md:inline"> ส่งออก Excel</span></button>
+            <button onClick={() => {setShowBatchEnroll(!showBatchEnroll); setShowAddSingle(false); setShowImport(false);}} className={`px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all`}><Layers size={16} className="inline md:mr-1"/><span className="hidden md:inline"> ลงทะเบียนทั้งห้อง</span></button>
+            <button onClick={() => {setShowAddSingle(!showAddSingle); setShowBatchEnroll(false); setShowImport(false);}} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold"><User size={16} className="inline md:mr-1" /><span className="hidden md:inline"> เพิ่มทีละคน</span></button>
+            <button onClick={() => {setShowImport(!showImport); setShowAddSingle(false); setShowBatchEnroll(false);}} className={`px-4 py-2.5 rounded-xl font-bold border ${isDark ? 'bg-slate-700 border-slate-600 text-white hover:bg-slate-600' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}><ClipboardPaste size={16} className="inline md:mr-1" /><span className="hidden md:inline"> นำเข้า Excel</span></button>
           </div>
         </div>
 
@@ -884,21 +968,21 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm min-w-[700px]">
             <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-              <tr><th className="p-4 text-center">รูป</th><th className="p-4">รหัส</th><th className="p-4">ชื่อ-สกุล</th><th className="p-4">เลขที่/ห้อง/ตอน</th><th className="p-4 text-center">ใช้งานล่าสุด</th><th className="p-4 text-center">จัดการ</th></tr>
+              <tr><th className="p-4 text-center">รูป</th><th className="p-4">รหัส</th><th className="p-4">ชื่อ-สกุล</th><th className="p-4">เลขที่/ห้อง</th><th className="p-4 text-center">ใช้งานล่าสุด</th><th className="p-4 text-center">จัดการ</th></tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {targetStudents.map(s => (
-                <tr key={s.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/50'}`}>
+                <tr key={s.id} onClick={() => setViewingStudent(s)} className={`transition-colors cursor-pointer ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/50'}`}>
                   <td className="p-4 text-center"><div className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto overflow-hidden border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
                     {s.profileImg ? <img src={getValidImgUrl(s.profileImg)} className="w-full h-full object-cover rounded-full"/> : <User size={18}/>}
                   </div></td>
                   <td className="p-4 font-mono font-bold text-blue-500">{s.id}</td>
                   <td className="p-4 font-bold">{s.name}</td>
-                  <td className="p-4 font-medium">{s.number} / {s.room} {s.section && s.section !== '-' ? `(${s.section})` : ''}</td>
+                  <td className="p-4 font-medium">{s.number} / {s.room} <span className="opacity-50 ml-1 text-xs">{s.section}</span></td>
                   <td className={`p-4 text-center text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{s.lastLogin ? s.lastLogin : '-'}</td>
                   <td className="p-4 text-center">
-                    <button onClick={() => openEdit(s)} className="text-amber-500 hover:text-amber-600 mr-3" title="แก้ไขข้อมูล/ลงทะเบียนวิชา"><Edit size={16}/></button>
-                    <button onClick={() => setConfirmDel(s.id)} className="text-red-400 hover:text-red-500" title="ลบนักเรียน"><Trash2 size={16}/></button>
+                    <button onClick={(e) => openEdit(e, s)} className="text-amber-500 hover:text-amber-600 mr-3" title="แก้ไขข้อมูล/ลงทะเบียนวิชา"><Edit size={16}/></button>
+                    <button onClick={(e) => { e.stopPropagation(); setConfirmDel(s.id); }} className="text-red-400 hover:text-red-500" title="ลบนักเรียน"><Trash2 size={16}/></button>
                   </td>
                 </tr>
               ))}
@@ -907,6 +991,22 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
           </table>
         </div>
       </div>
+
+      {viewingStudent && (
+         <ViewStudentModal 
+            student={viewingStudent} 
+            onClose={() => setViewingStudent(null)} 
+            students={students} 
+            setStudents={setStudents}
+            assignments={assignments}
+            submissions={submissions}
+            behaviors={behaviors}
+            enrollments={enrollments}
+            saveState={saveState}
+            showToast={showToast}
+            theme={theme}
+         />
+      )}
 
       {editForm && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
@@ -920,6 +1020,7 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
                 <div><label className="block text-xs font-bold mb-1">ชื่อ-สกุล</label><input required value={editForm.name || ''} onChange={e=>setEditForm({...editForm, name: e.target.value})} className={inputClass} /></div>
                 <div><label className="block text-xs font-bold mb-1">ห้อง</label><input required value={editForm.room || ''} onChange={e=>setEditForm({...editForm, room: e.target.value})} className={inputClass} /></div>
                 <div><label className="block text-xs font-bold mb-1">เลขที่</label><input value={editForm.number || ''} onChange={e=>setEditForm({...editForm, number: e.target.value})} className={inputClass} /></div>
+                <div className="col-span-2"><label className="block text-xs font-bold mb-1">ตอน (Group / Section)</label><input value={editForm.section || ''} onChange={e=>setEditForm({...editForm, section: e.target.value})} className={inputClass} placeholder="เช่น ก หรือ ข (ไม่บังคับ)" /></div>
               </div>
 
               <div className={`p-4 rounded-xl mt-4 border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
@@ -943,7 +1044,82 @@ function TeacherStudents({ subjects, students, setStudents, enrollments, setEnro
   );
 }
 
-function TeacherAttendance({ subjects, students, enrollments, attendance, setAttendance, showToast, theme }) {
+function ViewStudentModal({ student, onClose, students, setStudents, assignments, submissions, behaviors, enrollments, saveState, showToast, theme }) {
+  const isDark = theme === 'dark';
+  const inputClass = `w-full rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
+
+  const [contactForm, setContactForm] = useState({
+     studentPhone: student.studentPhone || '',
+     parentPhone: student.parentPhone || '',
+     parentRelation: student.parentRelation || ''
+  });
+
+  const totalBehaviors = behaviors.filter(b => String(b.studentId).trim() === String(student.id).trim()).reduce((sum, b) => sum + b.points, 0);
+  
+  // คำนวณงานค้างส่งเฉพาะวิชาที่นักเรียนลงทะเบียนเรียน
+  const enrolledSubjectIds = (enrollments || []).filter(e => String(e.studentId).trim() === String(student.id).trim()).map(e => e.subjectId);
+  const availableAsgs = assignments.filter(a => 
+     enrolledSubjectIds.includes(a.subjectId) && 
+     (a.targetRoom === 'all' || String(a.targetRoom).trim() === String(student.room).trim())
+  );
+  const missingCount = availableAsgs.filter(a => !submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim())).length;
+
+  const handleSaveContact = (e) => {
+     e.preventDefault();
+     const updatedStudents = students.map(s => String(s.id).trim() === String(student.id).trim() ? { ...s, ...contactForm } : s);
+     saveState({ students: updatedStudents });
+     showToast('บันทึกข้อมูลติดต่อสำเร็จ');
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in" onClick={onClose}>
+      <div className={`rounded-3xl w-full max-w-2xl shadow-2xl relative border flex flex-col max-h-[90vh] overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`} onClick={e => e.stopPropagation()}>
+         
+         <div className={`p-6 border-b flex justify-between items-center bg-gradient-to-r ${isDark ? 'from-blue-900/50 to-slate-800 border-slate-700' : 'from-blue-50 to-white border-slate-200'}`}>
+            <div className="flex items-center gap-4">
+               <div className="w-16 h-16 rounded-full border-2 border-white shadow-md overflow-hidden bg-white shrink-0">
+                  {student.profileImg ? <img src={getValidImgUrl(student.profileImg)} className="w-full h-full object-cover" /> : <User size={32} className="w-full h-full p-2 text-slate-400" />}
+               </div>
+               <div>
+                 <h2 className="text-xl font-black">{student.name}</h2>
+                 <div className="flex gap-2 text-sm font-bold mt-1">
+                    <span className="text-blue-500 font-mono">{student.id}</span>
+                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>| ห้อง {student.room} | เลขที่ {student.number}</span>
+                 </div>
+               </div>
+            </div>
+            <button onClick={onClose} className={`p-2 rounded-full transition-colors shrink-0 ${isDark ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'}`}><X size={20}/></button>
+         </div>
+
+         <div className="p-6 overflow-y-auto custom-scrollbar space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+               <div className={`p-4 rounded-2xl border text-center ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                  <p className="text-xs font-bold text-slate-500 mb-1">งานค้างส่ง (ทั้งหมด)</p>
+                  <p className={`text-3xl font-black ${missingCount > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{missingCount}</p>
+               </div>
+               <div className={`p-4 rounded-2xl border text-center ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                  <p className="text-xs font-bold text-slate-500 mb-1">คะแนนพฤติกรรมสะสม</p>
+                  <p className={`text-3xl font-black ${totalBehaviors > 0 ? 'text-emerald-500' : totalBehaviors < 0 ? 'text-red-500' : 'text-blue-500'}`}>{totalBehaviors > 0 ? `+${totalBehaviors}` : totalBehaviors}</p>
+               </div>
+            </div>
+
+            <form onSubmit={handleSaveContact} className={`p-5 rounded-2xl border ${isDark ? 'bg-slate-900/30 border-slate-700' : 'bg-white border-slate-200'}`}>
+               <h3 className="font-bold text-blue-500 mb-4 flex items-center"><User size={16} className="mr-2"/> ข้อมูลการติดต่อ</h3>
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div><label className="block text-xs font-bold mb-1">เบอร์โทรศัพท์นักเรียน</label><input type="text" value={contactForm.studentPhone} onChange={e=>setContactForm({...contactForm, studentPhone: e.target.value})} className={inputClass} placeholder="08x-xxx-xxxx" /></div>
+                  <div><label className="block text-xs font-bold mb-1">เบอร์โทรศัพท์ผู้ปกครอง</label><input type="text" value={contactForm.parentPhone} onChange={e=>setContactForm({...contactForm, parentPhone: e.target.value})} className={inputClass} placeholder="08x-xxx-xxxx" /></div>
+                  <div className="sm:col-span-2"><label className="block text-xs font-bold mb-1">ความสัมพันธ์ผู้ปกครอง (เช่น บิดา, มารดา)</label><input type="text" value={contactForm.parentRelation} onChange={e=>setContactForm({...contactForm, parentRelation: e.target.value})} className={inputClass} /></div>
+               </div>
+               <div className="mt-4 text-right"><button type="submit" className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-sm shadow-sm">บันทึกข้อมูลติดต่อ</button></div>
+            </form>
+         </div>
+      </div>
+    </div>
+  );
+}
+
+
+function TeacherAttendance({ subjects, students, enrollments, attendance, setAttendance, showToast, theme, getUniqueRooms, getUniqueSections }) {
   const [selectedSub, setSelectedSub] = useState(subjects[0]?.id || '');
   const [selectedRoom, setSelectedRoom] = useState('all');
   const [selectedSection, setSelectedSection] = useState('all');
@@ -953,12 +1129,12 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
 
   const enrolledIds = enrollments.filter(e => e.subjectId === selectedSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  const dynamicRooms = getUniqueRooms();
+  const dynamicSections = getUniqueSections(selectedRoom);
   
   const targetStudents = enrolledSts
-    .filter(s => selectedRoom === 'all' || String(s.room || '').trim() === String(selectedRoom).trim())
-    .filter(s => selectedSection === 'all' || String(s.section || '').trim() === String(selectedSection).trim());
+       .filter(s => selectedRoom === 'all' || String(s.room || '').trim() === String(selectedRoom).trim())
+       .filter(s => selectedSection === 'all' || String(s.section || '').trim() === String(selectedSection).trim());
 
   useEffect(() => {
     let initialStatus = {};
@@ -1001,7 +1177,7 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
       <div className={`p-6 rounded-3xl flex flex-wrap gap-4 items-end shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={selectedSub} onChange={e=>{setSelectedSub(e.target.value); setSelectedRoom('all'); setSelectedSection('all');}} className={inputClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
         <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={selectedRoom} onChange={e=>{setSelectedRoom(e.target.value); setSelectedSection('all');}} className={inputClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
-        <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={selectedSection} onChange={e=>setSelectedSection(e.target.value)} className={inputClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec=><option key={sec} value={sec}>ตอน {sec}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">ตอน (Section)</label><select value={selectedSection} onChange={e=>setSelectedSection(e.target.value)} className={inputClass} disabled={selectedRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
         <div><label className="block text-sm font-bold mb-2">วันที่</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} className={inputClass} /></div>
       </div>
 
@@ -1012,12 +1188,14 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm min-w-[600px]">
             <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-              <tr><th className="p-4 w-16 text-center">ห้อง/ตอน</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">สถานะการมาเรียน</th></tr>
+              <tr><th className="p-4 w-16 text-center">ห้อง</th><th className="p-4 w-16 text-center">ตอน</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">สถานะการมาเรียน</th></tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {targetStudents.map(s => (
                 <tr key={s.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/50'}`}>
-                  <td className="p-4 text-center font-bold text-slate-500">{s.room}{s.section && s.section !== '-' ? `(${s.section})` : ''}</td><td className="p-4 text-center font-bold">{s.number}</td>
+                  <td className="p-4 text-center font-bold text-slate-500">{s.room}</td>
+                  <td className="p-4 text-center font-bold text-slate-500">{s.section || '-'}</td>
+                  <td className="p-4 text-center font-bold">{s.number}</td>
                   <td className="p-4 font-bold"><span className="text-blue-500 mr-2 font-mono">{s.id}</span>{s.name}</td>
                   <td className="p-4">
                     <div className="flex justify-center gap-2">
@@ -1029,7 +1207,7 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
                   </td>
                 </tr>
               ))}
-              {targetStudents.length === 0 && <tr><td colSpan="4" className="text-center p-8 text-slate-500 font-bold">ไม่พบรายชื่อนักเรียน</td></tr>}
+              {targetStudents.length === 0 && <tr><td colSpan="5" className="text-center p-8 text-slate-500 font-bold">ไม่พบรายชื่อนักเรียน</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1038,7 +1216,7 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
   );
 }
 
-function TeacherAttendanceSummary({ subjects, students, enrollments, attendance, theme, showToast }) {
+function TeacherAttendanceSummary({ subjects, students, enrollments, attendance, theme, showToast, getUniqueRooms, getUniqueSections }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSection, setFilterSection] = useState('all');
@@ -1047,13 +1225,13 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
 
   const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  const dynamicRooms = getUniqueRooms();
+  const dynamicSections = getUniqueSections(filterRoom);
   
   const targetStudents = enrolledSts
-    .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
-    .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
-  
+      .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
+      .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
+
   const subObj = subjects.find(s => s.id === filterSub);
 
   const allDatesInMonth = [...new Set(attendance.filter(a => a.subjectId === filterSub && a.date.startsWith(filterMonth)).map(a => a.date))].sort();
@@ -1072,13 +1250,13 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
     if (!subObj) return;
     let csv = '\uFEFF'; 
     csv += `สรุปการเข้าเรียน วิชา ${subObj.name} (${subObj.code}) - เดือน ${filterMonth}\n`;
-    csv += 'ห้อง,เลขที่,รหัส,ชื่อ-สกุล,';
+    csv += 'ห้อง,ตอน,เลขที่,รหัส,ชื่อ-สกุล,';
     allDatesInMonth.forEach(d => csv += `"${d.split('-')[2]}/${d.split('-')[1]}",`);
     csv += 'มา (ครั้ง),สาย (ครั้ง),ลา (ครั้ง),ขาด (ครั้ง)\n';
 
     targetStudents.forEach(stu => {
       let counts = { present: 0, late: 0, leave: 0, absent: 0 };
-      csv += `${stu.room},${stu.number},="${stu.id}","${stu.name}",`;
+      csv += `="${stu.room}","${stu.section || ''}",${stu.number},="${stu.id}","${stu.name}",`;
       
       allDatesInMonth.forEach(date => {
         const record = attendance.find(a => a.studentId === stu.id && a.subjectId === filterSub && a.date === date);
@@ -1103,7 +1281,7 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
          <div className="flex gap-4 w-full md:w-auto items-end flex-wrap">
            <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={filterSub} onChange={e=>{setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={`w-full ${selectClass}`}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
            <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={filterRoom} onChange={e=>{setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
-           <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={filterSection} onChange={e=>setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec=><option key={sec} value={sec}>ตอน {sec}</option>)}</select></div>
+           <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={filterSection} onChange={e=>setFilterSection(e.target.value)} className={selectClass} disabled={filterRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
            <div><label className="block text-sm font-bold mb-2">เดือน</label><input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className={selectClass} /></div>
          </div>
          <button onClick={handleExportAttendance} className="flex items-center px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md w-full md:w-auto justify-center transition-colors"><DownloadCloud size={18} className="mr-2" /> ส่งออก Excel</button>
@@ -1114,7 +1292,7 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
           <table className="w-full text-left text-sm min-w-max border-collapse">
             <thead className={`font-bold sticky top-0 z-10 border-b shadow-sm ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
               <tr>
-                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ห้อง/ตอน</th><th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>เลขที่</th><th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รหัส / ชื่อ-สกุล</th>
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ห้อง</th><th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ตอน</th><th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>เลขที่</th><th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รหัส / ชื่อ-สกุล</th>
                 {allDatesInMonth.map(d => (<th key={d} className={`p-2 text-center border-r text-xs whitespace-nowrap ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`}>{d.split('-')[2]}/{d.split('-')[1]}</th>))}
                 {allDatesInMonth.length === 0 && <th className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ไม่มีข้อมูลในเดือนนี้</th>}
                 <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-green-900/20 text-green-400' : 'border-slate-200 bg-green-50 text-green-700'}`}>มา</th>
@@ -1128,7 +1306,8 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
                 let counts = { present: 0, late: 0, leave: 0, absent: 0 };
                 return (
                   <tr key={stu.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/40'}`}>
-                    <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.room}{stu.section && stu.section !== '-' ? `(${stu.section})` : ''}</td>
+                    <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.room}</td>
+                    <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.section || '-'}</td>
                     <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.number}</td>
                     <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><span className="text-blue-500 mr-2 font-mono">{stu.id}</span>{stu.name}</td>
                     {allDatesInMonth.map(date => {
@@ -1145,7 +1324,7 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
                   </tr>
                 );
               })}
-              {targetStudents.length === 0 && <tr><td colSpan={7 + allDatesInMonth.length} className="p-8 text-center font-bold text-slate-500">ไม่พบนักเรียนในวิชาและห้องที่เลือก</td></tr>}
+              {targetStudents.length === 0 && <tr><td colSpan={8 + allDatesInMonth.length} className="p-8 text-center font-bold text-slate-500">ไม่พบนักเรียนในวิชาและห้องที่เลือก</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1154,7 +1333,7 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
   );
 }
 
-function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehaviors, showToast, theme }) {
+function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehaviors, showToast, theme, getUniqueRooms, getUniqueSections }) {
   const [selectedSub, setSelectedSub] = useState(subjects[0]?.id || '');
   const [selectedRoom, setSelectedRoom] = useState('all');
   const [selectedSection, setSelectedSection] = useState('all');
@@ -1163,12 +1342,13 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
 
   const enrolledIds = enrollments.filter(e => e.subjectId === selectedSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  const dynamicRooms = getUniqueRooms();
+  const dynamicSections = getUniqueSections(selectedRoom);
   
   const targetStudents = enrolledSts
-    .filter(s => selectedRoom === 'all' || String(s.room || '').trim() === String(selectedRoom).trim())
-    .filter(s => selectedSection === 'all' || String(s.section || '').trim() === String(selectedSection).trim());
+       .filter(s => selectedRoom === 'all' || String(s.room || '').trim() === String(selectedRoom).trim())
+       .filter(s => selectedSection === 'all' || String(s.section || '').trim() === String(selectedSection).trim());
+
 
   const handleSaveBehavior = (studentId) => {
     const ptsInput = document.getElementById(`beh-pts-${studentId}`);
@@ -1191,7 +1371,7 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
       <div className={`p-6 rounded-3xl flex flex-wrap gap-4 items-end shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={selectedSub} onChange={e=>{setSelectedSub(e.target.value); setSelectedRoom('all'); setSelectedSection('all');}} className={inputClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
         <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={selectedRoom} onChange={e=>{setSelectedRoom(e.target.value); setSelectedSection('all');}} className={inputClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
-        <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={selectedSection} onChange={e=>setSelectedSection(e.target.value)} className={inputClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec=><option key={sec} value={sec}>ตอน {sec}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={selectedSection} onChange={e=>setSelectedSection(e.target.value)} className={inputClass} disabled={selectedRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
         <div><label className="block text-sm font-bold mb-2">วันที่</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} className={inputClass} /></div>
       </div>
 
@@ -1199,12 +1379,13 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm min-w-[800px]">
             <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-              <tr><th className="p-4 w-16 text-center">ห้อง/ตอน</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4 w-64">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">บันทึกคะแนนพฤติกรรม และ หมายเหตุ</th></tr>
+              <tr><th className="p-4 w-16 text-center">ห้อง</th><th className="p-4 w-16 text-center">ตอน</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4 w-64">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">บันทึกคะแนนพฤติกรรม และ หมายเหตุ</th></tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {targetStudents.map(s => (
                 <tr key={s.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/50'}`}>
-                  <td className="p-4 text-center font-bold text-slate-500">{s.room}{s.section && s.section !== '-' ? `(${s.section})` : ''}</td>
+                  <td className="p-4 text-center font-bold text-slate-500">{s.room}</td>
+                  <td className="p-4 text-center font-bold text-slate-500">{s.section || '-'}</td>
                   <td className="p-4 text-center font-bold">{s.number}</td>
                   <td className="p-4 font-bold"><span className="text-blue-500 mr-2 font-mono">{s.id}</span>{s.name}</td>
                   <td className="p-4">
@@ -1216,7 +1397,7 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
                   </td>
                 </tr>
               ))}
-              {targetStudents.length === 0 && <tr><td colSpan="4" className="text-center p-8 text-slate-500 font-bold">ไม่พบนักเรียนในวิชาหรือห้องที่เลือก</td></tr>}
+              {targetStudents.length === 0 && <tr><td colSpan="5" className="text-center p-8 text-slate-500 font-bold">ไม่พบนักเรียนในวิชาหรือห้องที่เลือก</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1503,17 +1684,18 @@ function TeacherAssignments({ assignments, setAssignments, subjects, showToast, 
   );
 }
 
-function TeacherGrading({ assignments, submissions, setSubmissions, students, subjects, enrollments, showToast, theme }) {
+function TeacherGrading({ assignments, submissions, setSubmissions, students, subjects, enrollments, showToast, theme, getUniqueRooms, getUniqueSections }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterAsg, setFilterAsg] = useState('all');
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSection, setFilterSection] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all'); 
   const isDark = theme === 'dark';
 
   const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  const dynamicRooms = getUniqueRooms();
+  const dynamicSections = getUniqueSections(filterRoom);
   const availableAsgs = assignments.filter(a => a.subjectId === filterSub);
 
   const filteredSubs = submissions.filter(sub => {
@@ -1524,6 +1706,7 @@ function TeacherGrading({ assignments, submissions, setSubmissions, students, su
     if (filterAsg !== 'all' && asg.id !== filterAsg) return false;
     if (filterRoom !== 'all' && String(stu.room || '').trim() !== String(filterRoom).trim()) return false;
     if (filterSection !== 'all' && String(stu.section || '').trim() !== String(filterSection).trim()) return false;
+    if (filterStatus !== 'all' && sub.status !== filterStatus) return false;
     return true;
   });
 
@@ -1542,17 +1725,31 @@ function TeacherGrading({ assignments, submissions, setSubmissions, students, su
     showToast('บันทึกคะแนนและประเมินเรียบร้อย');
   };
 
+  const handleEditGrade = (subId) => {
+    setSubmissions(submissions.map(s => s.id === subId ? { ...s, status: 'submitted' } : s));
+  };
+
+  const handleRejectSubmission = (subId) => {
+    if(window.confirm('คุณต้องการยกเลิกการส่งงานของนักเรียนคนนี้ เพื่อให้ส่งใหม่ใช่หรือไม่?')) {
+       setSubmissions(submissions.filter(s => s.id !== subId));
+       showToast('ยกเลิกการส่งงานเรียบร้อย นักเรียนสามารถส่งใหม่ได้แล้ว');
+    }
+  };
+
   const selectClass = `font-bold rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
 
   return (
     <div className={`max-w-6xl mx-auto rounded-3xl overflow-hidden shadow-sm flex flex-col h-[calc(100vh-120px)] border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-      <div className={`p-5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b shrink-0 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50/50 border-slate-200'}`}>
+      <div className={`p-5 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 border-b shrink-0 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50/50 border-slate-200'}`}>
         <h2 className="text-lg font-black flex items-center shrink-0"><CheckSquare className="mr-2 text-blue-500" size={20} /> ตรวจงานนักเรียน</h2>
-        <div className="flex flex-wrap gap-3 w-full lg:w-auto">
+        <div className="flex flex-wrap gap-2 w-full xl:w-auto">
           <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterAsg('all'); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
           <select value={filterAsg} onChange={e => setFilterAsg(e.target.value)} className={selectClass}><option value="all">ทุกงานในวิชานี้</option>{availableAsgs.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}</select>
           <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
-          <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec => <option key={sec} value={sec}>ตอน {sec}</option>)}</select>
+          <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass} disabled={filterRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s => <option key={s} value={s}>ตอน {s}</option>)}</select>
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={`font-bold rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 border ${filterStatus === 'submitted' ? 'bg-amber-100 text-amber-700 border-amber-200' : filterStatus === 'graded' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : (isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300')}`}>
+             <option value="all">สถานะทั้งหมด</option><option value="submitted">⏳ รอตรวจ</option><option value="graded">✅ ตรวจแล้ว</option>
+          </select>
         </div>
       </div>
       <div className={`p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1 ${isDark ? 'bg-slate-900/30' : 'bg-slate-50/30'}`}>
@@ -1567,10 +1764,10 @@ function TeacherGrading({ assignments, submissions, setSubmissions, students, su
                    {stu?.profileImg ? <img src={getValidImgUrl(stu.profileImg)} className="w-full h-full object-cover rounded-full"/> : <User size={20} className="text-slate-400"/>}
                  </div>
                  <div>
-                   <div className="flex flex-wrap items-center gap-2 mb-1"><span className="font-mono text-blue-500 font-bold">{stu?.id}</span><span className="font-black">{stu?.name}</span><span className={`text-xs px-2 py-0.5 rounded font-bold border ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>ห้อง {stu?.room}{stu?.section && stu.section !== '-' ? `(${stu?.section})` : ''}</span></div>
+                   <div className="flex flex-wrap items-center gap-2 mb-1"><span className="font-mono text-blue-500 font-bold">{stu?.id}</span><span className="font-black">{stu?.name}</span><span className={`text-xs px-2 py-0.5 rounded font-bold border ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>ห้อง {stu?.room} {stu?.section ? `(${stu.section})` : ''}</span></div>
                    <div className={`text-sm font-bold flex flex-wrap gap-2 items-center ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                       <span>{asg?.title}</span> <span className="text-slate-500 font-medium ml-1">(เต็ม {asg?.maxScore})</span>
-                      {isLate && <span className="text-xs text-white bg-red-500 px-2 py-1 rounded ml-2 font-bold animate-pulse inline-flex items-center"><AlertCircle size={12} className="mr-1"/> ส่งช้ากว่ากำหนด</span>}
+                      {isLate && <span className="text-xs text-white bg-red-500 px-2 py-1 rounded ml-2 font-bold animate-pulse inline-flex items-center"><AlertCircle size={12} className="mr-1"/> ส่งช้า</span>}
                    </div>
                  </div>
               </div>
@@ -1581,33 +1778,42 @@ function TeacherGrading({ assignments, submissions, setSubmissions, students, su
                 </a>
                 
                 {sub.status === 'graded' ? (
-                  <div className="text-right">
-                    <div className="text-green-500 font-black bg-green-500/10 border border-green-500/20 px-5 py-2.5 rounded-xl">{sub.score} / {asg?.maxScore}</div>
-                    {sub.penalty > 0 && <div className="text-xs font-bold text-red-500 mt-1">ถูกหักส่งช้า -{sub.penalty}</div>}
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <div className="text-green-500 font-black bg-green-500/10 border border-green-500/20 px-5 py-2.5 rounded-xl">{sub.score} / {asg?.maxScore}</div>
+                      {sub.penalty > 0 && <div className="text-xs font-bold text-red-500 mt-1">ถูกหักส่งช้า -{sub.penalty}</div>}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <button onClick={() => handleEditGrade(sub.id)} className={`p-2 rounded-lg text-amber-500 transition-colors ${isDark ? 'bg-amber-900/30 hover:bg-amber-900/50' : 'bg-amber-50 hover:bg-amber-100'}`} title="แก้ไขคะแนนใหม่"><Edit size={16}/></button>
+                      <button onClick={() => handleRejectSubmission(sub.id)} className={`p-2 rounded-lg text-red-500 transition-colors ${isDark ? 'bg-red-900/30 hover:bg-red-900/50' : 'bg-red-50 hover:bg-red-100'}`} title="ตีกลับ / ยกเลิกการส่ง"><Trash2 size={16}/></button>
+                    </div>
                   </div>
                 ) : (
-                  <div className={`flex flex-col gap-2 p-3 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                    <div className="flex items-center gap-2">
-                      <input type="number" id={`score-${sub.id}`} className={`w-20 rounded-lg px-2 py-2 text-center font-bold outline-none border ${isDark ? 'bg-slate-800 border-slate-600 text-white focus:border-blue-500' : 'bg-white border-slate-300 focus:border-blue-500'}`} placeholder="คะแนน" />
-                      <span className="text-slate-500 font-bold w-12">/ {asg?.maxScore}</span>
+                  <div className="flex items-center gap-2">
+                    <div className={`flex flex-col gap-2 p-3 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="flex items-center gap-2">
+                        <input type="number" id={`score-${sub.id}`} className={`w-20 rounded-lg px-2 py-2 text-center font-bold outline-none border ${isDark ? 'bg-slate-800 border-slate-600 text-white focus:border-blue-500' : 'bg-white border-slate-300 focus:border-blue-500'}`} placeholder="คะแนน" />
+                        <span className="text-slate-500 font-bold w-12">/ {asg?.maxScore}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input type="number" id={`penalty-${sub.id}`} className={`w-20 rounded-lg px-2 py-2 text-center font-bold outline-none border ${isDark ? 'bg-slate-800 border-slate-600 text-red-400 focus:border-red-500' : 'bg-white border-red-200 text-red-600 focus:border-red-500'}`} placeholder="หักส่งช้า" defaultValue={isLate ? "1" : "0"} />
+                        <button onClick={() => handleGrade(sub.id, asg?.maxScore)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold flex-1">บันทึก</button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <input type="number" id={`penalty-${sub.id}`} className={`w-20 rounded-lg px-2 py-2 text-center font-bold outline-none border ${isDark ? 'bg-slate-800 border-slate-600 text-red-400 focus:border-red-500' : 'bg-white border-red-200 text-red-600 focus:border-red-500'}`} placeholder="หักส่งช้า" defaultValue={isLate ? "1" : "0"} />
-                      <button onClick={() => handleGrade(sub.id, asg?.maxScore)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold flex-1">บันทึก</button>
-                    </div>
+                    <button onClick={() => handleRejectSubmission(sub.id)} className={`p-3 rounded-xl text-red-500 transition-colors h-full border ${isDark ? 'bg-slate-900 border-slate-700 hover:bg-red-900/30' : 'bg-slate-50 border-slate-200 hover:bg-red-50'}`} title="ตีกลับ / ยกเลิกการส่งเพื่อให้นักเรียนส่งใหม่"><Trash2 size={20}/></button>
                   </div>
                 )}
               </div>
             </div>
           );
         })}
-        {filteredSubs.length === 0 && <div className="text-center text-slate-500 py-16 font-bold">ไม่พบงานที่รอตรวจ</div>}
+        {filteredSubs.length === 0 && <div className="text-center text-slate-500 py-16 font-bold">ไม่พบงานตามเงื่อนไขที่เลือก</div>}
       </div>
     </div>
   );
 }
 
-function TeacherExams({ subjects, students, enrollments, exams, setExams, showToast, theme }) {
+function TeacherExams({ subjects, students, enrollments, exams, setExams, showToast, theme, getUniqueRooms, getUniqueSections }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSection, setFilterSection] = useState('all');
@@ -1616,12 +1822,12 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
 
   const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  const dynamicRooms = getUniqueRooms();
+  const dynamicSections = getUniqueSections(filterRoom);
   
   const targetStudents = enrolledSts
-    .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
-    .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
+       .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
+       .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
 
   const subObj = subjects.find(s => s.id === filterSub);
   const maxScore = examType === 'midterm' ? (subObj?.midtermMax ?? 20) : (subObj?.finalMax ?? 30);
@@ -1670,7 +1876,7 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
        <div className={`p-6 rounded-3xl flex gap-4 shadow-sm items-end flex-wrap border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={filterSub} onChange={e=>{setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
           <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={filterRoom} onChange={e=>{setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
-          <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={filterSection} onChange={e=>setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec=><option key={sec} value={sec}>ตอน {sec}</option>)}</select></div>
+          <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={filterSection} onChange={e=>setFilterSection(e.target.value)} className={selectClass} disabled={filterRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
        </div>
 
        <div className={`rounded-3xl overflow-hidden shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -1687,7 +1893,8 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
            <table className="w-full text-left text-sm min-w-[600px]">
              <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
                <tr>
-                 <th className="p-4 w-16 text-center">ห้อง/ตอน</th>
+                 <th className="p-4 w-16 text-center">ห้อง</th>
+                 <th className="p-4 w-16 text-center">ตอน</th>
                  <th className="p-4 w-16 text-center">เลขที่</th>
                  <th className="p-4 w-24">รหัส</th>
                  <th className="p-4">ชื่อ-สกุล</th>
@@ -1700,7 +1907,8 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
                   const currentScore = examType === 'midterm' ? rec.midterm : rec.final;
                   return (
                      <tr key={s.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/50'}`}>
-                       <td className="p-4 text-center font-bold text-slate-500">{s.room}{s.section && s.section !== '-' ? `(${s.section})` : ''}</td>
+                       <td className="p-4 text-center font-bold text-slate-500">{s.room}</td>
+                       <td className="p-4 text-center font-bold text-slate-500">{s.section || '-'}</td>
                        <td className="p-4 text-center font-bold">{s.number}</td>
                        <td className="p-4 font-mono font-bold text-blue-500">{s.id}</td>
                        <td className="p-4 font-bold">{s.name}</td>
@@ -1710,7 +1918,7 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
                      </tr>
                   );
                })}
-               {targetStudents.length === 0 && <tr><td colSpan="5" className="text-center p-8 font-bold text-slate-500">ไม่พบนักเรียนในวิชาและห้องนี้</td></tr>}
+               {targetStudents.length === 0 && <tr><td colSpan="6" className="text-center p-8 font-bold text-slate-500">ไม่พบนักเรียนในวิชาและห้องนี้</td></tr>}
              </tbody>
            </table>
          </div>
@@ -1719,7 +1927,7 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
   );
 }
 
-function TeacherSummary({ subjects, students, assignments, submissions, exams, behaviors, enrollments, showToast, theme }) {
+function TeacherSummary({ subjects, students, assignments, submissions, exams, behaviors, enrollments, showToast, theme, getUniqueRooms, getUniqueSections }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSection, setFilterSection] = useState('all');
@@ -1732,12 +1940,12 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
   const targetAsgs = assignments.filter(a => a.subjectId === filterSub);
   const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
   const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = [...new Set(enrolledSts.map(s => String(s.room || '').trim()))].sort();
-  const dynamicSections = [...new Set(enrolledSts.map(s => String(s.section || '').trim()).filter(s => s && s !== '-'))].sort();
+  const dynamicRooms = getUniqueRooms();
+  const dynamicSections = getUniqueSections(filterRoom);
   
   const targetSts = enrolledSts
-    .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
-    .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
+      .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
+      .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
 
   const matrix = targetSts.map(stu => {
     let asgTotal = 0;
@@ -1765,14 +1973,14 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
     csv += `รวมงาน (${maxAsgTotal}),กลางภาค (${maxMid}),ปลายภาค (${maxFin}),รวมสุทธิ (${maxGrandTotal}),พฤติกรรม\n`;
 
     matrix.forEach(row => {
-      csv += `${row.room},${row.section || '-'},${row.number},="${row.id}","${row.name}",`;
+      csv += `="${row.room}","${row.section || ''}",${row.number},="${row.id}","${row.name}",`;
       targetAsgs.forEach(a => csv += `${row.scores[a.id]},`);
       csv += `${row.asgTotal},${row.mid},${row.fin},${row.grandTotal},${row.behaviorTotal}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = `Score_${subObj?.code}_Room_${filterRoom}${filterSection !== 'all' ? '_Sec_'+filterSection : ''}.csv`; link.click();
+    const link = document.createElement('a'); link.href = url; link.download = `Score_${subObj?.code}_Room_${filterRoom}.csv`; link.click();
     showToast('ดาวน์โหลดไฟล์ Excel (.csv) สำเร็จ');
   };
 
@@ -1784,7 +1992,7 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
          <div className="flex gap-4 w-full md:w-auto">
            <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}><option value="">-- เลือกวิชา --</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
            <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
-           <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(sec => <option key={sec} value={sec}>ตอน {sec}</option>)}</select>
+           <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass} disabled={filterRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s => <option key={s} value={s}>ตอน {s}</option>)}</select>
          </div>
          <button onClick={handleExport} className="flex items-center px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md w-full md:w-auto justify-center transition-colors"><DownloadCloud size={18} className="mr-2" /> ส่งออก Excel</button>
       </div>
@@ -1793,7 +2001,8 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
           <table className="w-full text-left text-sm min-w-max border-collapse">
             <thead className={`font-bold sticky top-0 z-10 border-b shadow-sm ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
               <tr>
-                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ห้อง/ตอน</th>
+                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ห้อง</th>
+                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ตอน</th>
                 <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">เลขที่</th>
                 <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">รหัส / ชื่อ-สกุล</th>
                 <th className={`p-2 text-center border-r border-b ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`} colSpan={targetAsgs.length || 1}>คะแนนเก็บ (งาน)</th>
@@ -1811,7 +2020,8 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {matrix.map((row) => (
                 <tr key={row.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/40'}`}>
-                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.room}{row.section && row.section !== '-' ? `(${row.section})` : ''}</td>
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.room}</td>
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.section || '-'}</td>
                   <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.number}</td>
                   <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><span className="text-blue-500 mr-2 font-mono">{row.id}</span>{row.name}</td>
                   {targetAsgs.length === 0 && <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>-</td>}
@@ -1947,7 +2157,7 @@ function StudentDashboard({ student, subjects, assignments, submissions, setActi
           <h2 className="text-3xl font-black mb-3">{student.name}</h2>
           <div className="flex flex-wrap justify-center md:justify-start gap-2">
             <span className="bg-white/20 backdrop-blur-sm px-4 py-1.5 rounded-xl font-mono font-bold text-sm shadow-sm border border-white/10">รหัส {student.id}</span>
-            <span className="bg-white/20 backdrop-blur-sm px-4 py-1.5 rounded-xl font-bold text-sm shadow-sm border border-white/10">ห้อง {student.room} | เลขที่ {student.number}</span>
+            <span className="bg-white/20 backdrop-blur-sm px-4 py-1.5 rounded-xl font-bold text-sm shadow-sm border border-white/10">ห้อง {student.room} {student.section ? `(${student.section})` : ''} | เลขที่ {student.number}</span>
           </div>
           <p className="text-sm font-bold mt-5 flex items-center justify-center md:justify-start"><Layers size={16} className="mr-2"/> ลงทะเบียนเรียน {subjects.length} วิชา</p>
         </div>
@@ -2281,9 +2491,16 @@ function StudentAttendance({ student, subjects, attendance, behaviors, theme }) 
   );
 }
 
-function StudentProfile({ student, students, setStudents, showToast, dbUrl, theme }) {
+function StudentProfile({ student, students, setStudents, showToast, dbUrl, theme, saveState }) {
   const [pwdForm, setPwdForm] = useState({ old: '', new: '', confirm: '' });
   const [profileImg, setProfileImg] = useState(student.profileImg);
+  
+  const [contactForm, setContactForm] = useState({
+     studentPhone: student.studentPhone || '',
+     parentPhone: student.parentPhone || '',
+     parentRelation: student.parentRelation || ''
+  });
+
   const isDark = theme === 'dark';
 
   const handleImageChange = async (e) => {
@@ -2310,30 +2527,63 @@ function StudentProfile({ student, students, setStudents, showToast, dbUrl, them
     showToast('เปลี่ยนรหัสผ่านสำเร็จ'); 
     setPwdForm({ old: '', new: '', confirm: '' });
   };
+  
+  const handleSaveContact = (e) => {
+     e.preventDefault();
+     const updatedStudents = students.map(s => String(s.id).trim() === String(student.id).trim() ? { ...s, ...contactForm } : s);
+     saveState({ students: updatedStudents });
+     showToast('บันทึกข้อมูลติดต่อของคุณสำเร็จแล้ว');
+  };
 
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-       <div className={`rounded-3xl p-8 shadow-sm text-center relative overflow-hidden border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-         <div className="absolute top-0 left-0 w-full h-32 bg-blue-600"></div>
-         <div className={`w-32 h-32 mx-auto rounded-full border-4 shadow-lg relative group overflow-hidden mt-12 flex justify-center items-center z-10 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-white'}`}>
-            {profileImg ? <img src={getValidImgUrl(profileImg)} className="w-full h-full object-cover rounded-full" /> : <User size={48} className="text-slate-400"/>}
-            <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Camera className="text-white" size={32} /><input type="file" accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer"/></div>
-         </div>
-         <h3 className="text-2xl font-black mt-4 relative z-10">{student.name}</h3>
-         <p className="text-blue-500 font-bold text-sm relative z-10 mb-2">รหัส {student.id} | ห้อง {student.room} | เลขที่ {student.number}</p>
-         <p className={`text-xs font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>* ไม่สามารถเปลี่ยนข้อมูลส่วนตัวได้ หากต้องการแก้ไขโปรดติดต่อคุณครู</p>
-         <div className="mt-6"><label className="cursor-pointer inline-flex items-center px-6 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow-md transition-colors"><Camera size={18} className="mr-2" /> เปลี่ยนรูปประจำตัว<input type="file" accept="image/*" onChange={handleImageChange} className="hidden" /></label></div>
+    <div className="max-w-4xl mx-auto space-y-6 flex flex-col md:flex-row gap-6">
+       
+       <div className="md:w-1/3 flex flex-col gap-6">
+           <div className={`rounded-3xl p-8 shadow-sm text-center relative overflow-hidden border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+             <div className="absolute top-0 left-0 w-full h-32 bg-blue-600"></div>
+             <div className={`w-32 h-32 mx-auto rounded-full border-4 shadow-lg relative group overflow-hidden mt-12 flex justify-center items-center z-10 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-white'}`}>
+                {profileImg ? <img src={getValidImgUrl(profileImg)} className="w-full h-full object-cover rounded-full" /> : <User size={48} className="text-slate-400"/>}
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Camera className="text-white" size={32} /><input type="file" accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer"/></div>
+             </div>
+             <h3 className="text-2xl font-black mt-4 relative z-10">{student.name}</h3>
+             <p className="text-blue-500 font-bold text-sm relative z-10 mb-2">รหัส {student.id}</p>
+             <div className="mt-4"><label className="cursor-pointer inline-flex items-center px-6 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow-md transition-colors"><Camera size={18} className="mr-2" /> เปลี่ยนรูปประจำตัว<input type="file" accept="image/*" onChange={handleImageChange} className="hidden" /></label></div>
+           </div>
+
+           <div className={`rounded-3xl p-6 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+             <h4 className="font-bold text-slate-500 text-sm mb-4">ข้อมูลนักเรียน (เปลี่ยนไม่ได้)</h4>
+             <div className="space-y-3 font-bold">
+                <div className={`flex justify-between p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}><span className="text-slate-500">ห้อง</span><span>{student.room}</span></div>
+                <div className={`flex justify-between p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}><span className="text-slate-500">เลขที่</span><span>{student.number}</span></div>
+                <div className={`flex justify-between p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}><span className="text-slate-500">ตอน</span><span>{student.section || '-'}</span></div>
+             </div>
+           </div>
        </div>
 
-       <form onSubmit={handleChangePwd} className={`rounded-3xl p-8 shadow-sm space-y-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-         <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><Settings className="mr-3 text-blue-500"/> เปลี่ยนรหัสผ่าน</h3>
-         <div><label className="block text-sm font-bold mb-2">รหัสผ่านเดิม</label><input required type="password" value={pwdForm.old} onChange={e=>setPwdForm({...pwdForm, old: e.target.value})} className={inputClass} /></div>
-         <div><label className="block text-sm font-bold mb-2">รหัสผ่านใหม่</label><input required type="password" value={pwdForm.new} onChange={e=>setPwdForm({...pwdForm, new: e.target.value})} className={inputClass} /></div>
-         <div><label className="block text-sm font-bold mb-2">ยืนยันรหัสผ่านใหม่</label><input required type="password" value={pwdForm.confirm} onChange={e=>setPwdForm({...pwdForm, confirm: e.target.value})} className={inputClass} /></div>
-         <div className="pt-2"><button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-all">อัปเดตรหัสผ่าน</button></div>
-       </form>
+       <div className="md:w-2/3 flex flex-col gap-6">
+           <form onSubmit={handleSaveContact} className={`rounded-3xl p-8 shadow-sm space-y-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+             <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><User className="mr-3 text-blue-500"/> ข้อมูลการติดต่อ</h3>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div><label className="block text-sm font-bold mb-2">เบอร์โทรศัพท์ของคุณ (นักเรียน)</label><input type="text" value={contactForm.studentPhone} onChange={e=>setContactForm({...contactForm, studentPhone: e.target.value})} className={inputClass} placeholder="08x-xxx-xxxx" /></div>
+                <div><label className="block text-sm font-bold mb-2">เบอร์โทรศัพท์ผู้ปกครอง</label><input type="text" value={contactForm.parentPhone} onChange={e=>setContactForm({...contactForm, parentPhone: e.target.value})} className={inputClass} placeholder="08x-xxx-xxxx" /></div>
+                <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">ความสัมพันธ์ผู้ปกครอง (เช่น บิดา, มารดา, ป้า, ปู่, พี่)</label><input type="text" value={contactForm.parentRelation} onChange={e=>setContactForm({...contactForm, parentRelation: e.target.value})} className={inputClass} /></div>
+             </div>
+             <div className="pt-2 flex justify-end"><button type="submit" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-all">บันทึกข้อมูลติดต่อ</button></div>
+           </form>
+
+           <form onSubmit={handleChangePwd} className={`rounded-3xl p-8 shadow-sm space-y-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+             <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><Settings className="mr-3 text-blue-500"/> เปลี่ยนรหัสผ่าน</h3>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+               <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">รหัสผ่านเดิม</label><input required type="password" value={pwdForm.old} onChange={e=>setPwdForm({...pwdForm, old: e.target.value})} className={inputClass} /></div>
+               <div><label className="block text-sm font-bold mb-2">รหัสผ่านใหม่</label><input required type="password" value={pwdForm.new} onChange={e=>setPwdForm({...pwdForm, new: e.target.value})} className={inputClass} /></div>
+               <div><label className="block text-sm font-bold mb-2">ยืนยันรหัสผ่านใหม่</label><input required type="password" value={pwdForm.confirm} onChange={e=>setPwdForm({...pwdForm, confirm: e.target.value})} className={inputClass} /></div>
+             </div>
+             <div className="pt-2 flex justify-end"><button type="submit" className="px-8 py-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold shadow-md transition-all">อัปเดตรหัสผ่าน</button></div>
+           </form>
+       </div>
+
     </div>
   );
 }
