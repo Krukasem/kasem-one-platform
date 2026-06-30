@@ -591,7 +591,7 @@ function TeacherAnnouncements({ announcements, setAnnouncements, subjects, getUn
           reader.onload = async () => {
             const base64 = reader.result.split(',')[1];
             const payload = { action: 'uploadMaterial', filename: `ann_${Date.now()}_${imageFile.name}`, mimeType: imageFile.type, fileData: base64 };
-            const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
+            const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
             const data = await res.json();
             if (data.url) uploadedImageUrl = data.url;
             resolve();
@@ -1415,7 +1415,10 @@ function TeacherMaterials({ subjects, materials, setMaterials, dbUrl, showToast,
   const [confirmDel, setConfirmDel] = useState(null);
   const isDark = theme === 'dark';
 
-  const filteredMaterials = materials.filter(m => m.title.toLowerCase().includes(searchQuery.toLowerCase()) || m.description.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredMaterials = materials.filter(m => 
+    String(m.title || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+    String(m.description || '').toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -1429,7 +1432,7 @@ function TeacherMaterials({ subjects, materials, setMaterials, dbUrl, showToast,
       const base64 = reader.result.split(',')[1];
       const payload = { action: 'uploadMaterial', filename: file.name, mimeType: file.type, fileData: base64 };
       try {
-        const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
+        const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
         const data = await res.json();
         if (data.url) {
            setMaterials([{ id: `m${Date.now()}`, ...form, fileName: file.name, url: data.url, uploadedAt: new Date().toISOString().split('T')[0] }, ...materials]);
@@ -1517,7 +1520,7 @@ function TeacherAssignments({ assignments, setAssignments, subjects, showToast, 
           reader.onload = async () => {
             const base64 = reader.result.split(',')[1];
             const payload = { action: 'uploadAssignmentImg', filename: `asg_${Date.now()}_${imageFile.name}`, mimeType: imageFile.type, fileData: base64 };
-            const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
+            const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
             const data = await res.json();
             if (data.url) uploadedImageUrl = data.url;
             resolve();
@@ -1550,7 +1553,7 @@ function TeacherAssignments({ assignments, setAssignments, subjects, showToast, 
           reader.onload = async () => {
             const base64 = reader.result.split(',')[1];
             const payload = { action: 'uploadAssignmentImg', filename: `asg_${Date.now()}_${imageFile.name}`, mimeType: imageFile.type, fileData: base64 };
-            const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
+            const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
             const data = await res.json();
             if (data.url) uploadedImageUrl = data.url;
             resolve();
@@ -2146,7 +2149,7 @@ function StudentView(props) {
 
 function StudentDashboard({ student, subjects, assignments, submissions, setActiveTab, theme }) {
   const isDark = theme === 'dark';
-  const pendingAsgs = assignments.filter(a => !submissions.find(s => s.assignmentId === a.id && s.studentId === student.id));
+  const pendingAsgs = assignments.filter(a => !submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim()));
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className={`rounded-3xl p-6 md:p-8 flex flex-col md:flex-row items-center md:items-start text-center md:text-left shadow-lg relative overflow-hidden bg-gradient-to-br ${isDark ? 'from-blue-900 to-indigo-900 border border-blue-800' : 'from-blue-600 to-cyan-500 border border-blue-500'}`}>
@@ -2229,7 +2232,11 @@ function StudentMaterials({ subjects, materials, theme }) {
   const [searchQuery, setSearchQuery] = useState('');
   const isDark = theme === 'dark';
   const mySubIds = subjects.map(s => s.id);
-  const myMats = materials.filter(m => mySubIds.includes(m.subjectId) && (m.title.toLowerCase().includes(searchQuery.toLowerCase()) || m.description.toLowerCase().includes(searchQuery.toLowerCase())));
+  const myMats = materials.filter(m => 
+    mySubIds.includes(m.subjectId) && 
+    (String(m.title || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+     String(m.description || '').toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -2285,7 +2292,7 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
       if (!linkInput) return showToast('กรุณากรอกลิงก์ผลงาน');
       if (!linkInput.startsWith('http://') && !linkInput.startsWith('https://')) return showToast('ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://');
       
-      setSubmissions([...submissions, { id: `s${Date.now()}`, assignmentId: selectedAsg.id, studentId: student.id, status: 'submitted', score: null, fileUrl: linkInput, type: 'link', submittedAt: new Date().toLocaleString('th-TH'), submittedAtISO: new Date().toISOString() }]);
+      setSubmissions([...submissions, { id: `s${Date.now()}`, assignmentId: selectedAsg.id, studentId: String(student.id).trim(), status: 'submitted', score: null, fileUrl: linkInput, type: 'link', submittedAt: new Date().toLocaleString('th-TH'), submittedAtISO: new Date().toISOString() }]);
       showToast('ส่งงานในรูปแบบลิงก์เรียบร้อยแล้ว');
       setSelectedAsg(null); setLinkInput('');
       return;
@@ -2301,10 +2308,10 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
       const base64 = reader.result.split(',')[1];
       const payload = { action: 'uploadSubmission', filename: `${student.id}_${file.name}`, mimeType: file.type, fileData: base64 };
       try {
-        const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
+        const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
         const data = await res.json();
         if(data.url) {
-          setSubmissions([...submissions, { id: `s${Date.now()}`, assignmentId: selectedAsg.id, studentId: student.id, status: 'submitted', score: null, fileUrl: data.url, type: 'file', submittedAt: new Date().toLocaleString('th-TH'), submittedAtISO: new Date().toISOString() }]);
+          setSubmissions([...submissions, { id: `s${Date.now()}`, assignmentId: selectedAsg.id, studentId: String(student.id).trim(), status: 'submitted', score: null, fileUrl: data.url, type: 'file', submittedAt: new Date().toLocaleString('th-TH'), submittedAtISO: new Date().toISOString() }]);
           showToast('ส่งงานเรียบร้อย บันทึกไฟล์ลง Google Drive สำเร็จ');
           setSelectedAsg(null); setFile(null);
         }
@@ -2324,7 +2331,7 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
       <div className="space-y-5">
         {filteredAsgs.map(asg => {
           const subObj = subjects.find(s => s.id === asg.subjectId);
-          const sub = submissions.find(s => s.assignmentId === asg.id && s.studentId === student.id);
+          const sub = submissions.find(s => s.assignmentId === asg.id && String(s.studentId).trim() === String(student.id).trim());
           return (
             <div key={asg.id} className={`rounded-3xl p-6 shadow-sm flex flex-col lg:flex-row justify-between gap-6 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
               
@@ -2432,7 +2439,7 @@ function StudentScores({ student, subjects, assignments, submissions, theme }) {
               <tbody className={`divide-y ${isDark ? 'divide-slate-700' : 'divide-slate-100'}`}>
                 {subAsgs.map(asg => {
                   maxTotal += asg.maxScore;
-                  const subM = submissions.find(s => s.assignmentId === asg.id && s.studentId === student.id);
+                  const subM = submissions.find(s => s.assignmentId === asg.id && String(s.studentId).trim() === String(student.id).trim());
                   const score = (subM && subM.status === 'graded') ? subM.score : 0;
                   totalScore += score;
                   return (
@@ -2457,8 +2464,8 @@ function StudentScores({ student, subjects, assignments, submissions, theme }) {
 
 function StudentAttendance({ student, subjects, attendance, behaviors, theme }) {
   const isDark = theme === 'dark';
-  const studentAtt = attendance.filter(a => a.studentId === student.id);
-  const studentBeh = behaviors.filter(b => b.studentId === student.id);
+  const studentAtt = attendance.filter(a => String(a.studentId).trim() === String(student.id).trim());
+  const studentBeh = behaviors.filter(b => String(b.studentId).trim() === String(student.id).trim());
   
   return (
     <div className="max-w-4xl mx-auto space-y-6">
