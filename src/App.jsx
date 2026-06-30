@@ -2149,7 +2149,10 @@ function StudentView(props) {
 
 function StudentDashboard({ student, subjects, assignments, submissions, setActiveTab, theme }) {
   const isDark = theme === 'dark';
-  const pendingAsgs = assignments.filter(a => !submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim()));
+  const pendingAsgs = assignments.filter(a => 
+    (!a.targetRoom || a.targetRoom === 'all' || String(a.targetRoom).trim() === String(student.room).trim()) &&
+    !submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim())
+  );
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className={`rounded-3xl p-6 md:p-8 flex flex-col md:flex-row items-center md:items-start text-center md:text-left shadow-lg relative overflow-hidden bg-gradient-to-br ${isDark ? 'from-blue-900 to-indigo-900 border border-blue-800' : 'from-blue-600 to-cyan-500 border border-blue-500'}`}>
@@ -2288,11 +2291,36 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // เพิ่มการตรวจสอบว่าเคยส่งงานนี้ไปแล้วหรือยัง (ดักไว้เผื่อนักเรียนกดย้ำๆ หรือเน็ตช้า)
+    const existingSubIndex = submissions.findIndex(s => s.assignmentId === selectedAsg.id && String(s.studentId).trim() === String(student.id).trim());
+
+    // ฟังก์ชันช่วยบันทึก: ถ้ามีของเดิมให้เขียนทับ ถ้าไม่มีให้เพิ่มใหม่
+    const saveSubmission = (newSubData) => {
+       if (existingSubIndex >= 0) {
+           const updatedSubs = [...submissions];
+           updatedSubs[existingSubIndex] = { ...updatedSubs[existingSubIndex], ...newSubData };
+           setSubmissions(updatedSubs);
+       } else {
+           setSubmissions([...submissions, newSubData]);
+       }
+    };
+
     if (submitMode === 'link') {
       if (!linkInput) return showToast('กรุณากรอกลิงก์ผลงาน');
       if (!linkInput.startsWith('http://') && !linkInput.startsWith('https://')) return showToast('ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://');
       
-      setSubmissions([...submissions, { id: `s${Date.now()}`, assignmentId: selectedAsg.id, studentId: String(student.id).trim(), status: 'submitted', score: null, fileUrl: linkInput, type: 'link', submittedAt: new Date().toLocaleString('th-TH'), submittedAtISO: new Date().toISOString() }]);
+      saveSubmission({ 
+        id: existingSubIndex >= 0 ? submissions[existingSubIndex].id : `s${Date.now()}`, 
+        assignmentId: selectedAsg.id, 
+        studentId: String(student.id).trim(), 
+        status: 'submitted', 
+        score: null, 
+        fileUrl: linkInput, 
+        type: 'link', 
+        submittedAt: new Date().toLocaleString('th-TH'), 
+        submittedAtISO: new Date().toISOString() 
+      });
+      
       showToast('ส่งงานในรูปแบบลิงก์เรียบร้อยแล้ว');
       setSelectedAsg(null); setLinkInput('');
       return;
@@ -2311,7 +2339,18 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
         const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
         const data = await res.json();
         if(data.url) {
-          setSubmissions([...submissions, { id: `s${Date.now()}`, assignmentId: selectedAsg.id, studentId: String(student.id).trim(), status: 'submitted', score: null, fileUrl: data.url, type: 'file', submittedAt: new Date().toLocaleString('th-TH'), submittedAtISO: new Date().toISOString() }]);
+          saveSubmission({ 
+            id: existingSubIndex >= 0 ? submissions[existingSubIndex].id : `s${Date.now()}`, 
+            assignmentId: selectedAsg.id, 
+            studentId: String(student.id).trim(), 
+            status: 'submitted', 
+            score: null, 
+            fileUrl: data.url, 
+            type: 'file', 
+            submittedAt: new Date().toLocaleString('th-TH'), 
+            submittedAtISO: new Date().toISOString() 
+          });
+          
           showToast('ส่งงานเรียบร้อย บันทึกไฟล์ลง Google Drive สำเร็จ');
           setSelectedAsg(null); setFile(null);
         }
@@ -2425,7 +2464,10 @@ function StudentScores({ student, subjects, assignments, submissions, theme }) {
     <div className="max-w-4xl mx-auto space-y-6">
       <h3 className="text-2xl font-black border-l-4 border-blue-500 pl-4 mb-6">สรุปคะแนนแยกรายวิชา</h3>
       {subjects.map(sub => {
-        const subAsgs = assignments.filter(a => a.subjectId === sub.id);
+        const subAsgs = assignments.filter(a => 
+           a.subjectId === sub.id && 
+           (!a.targetRoom || a.targetRoom === 'all' || String(a.targetRoom).trim() === String(student.room).trim())
+        );
         if(subAsgs.length === 0) return null;
         let totalScore = 0; let maxTotal = 0;
         
