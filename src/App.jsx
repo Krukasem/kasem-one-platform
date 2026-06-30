@@ -104,6 +104,26 @@ export default function App() {
           if (rawData && rawData.trim() !== '{}') {
             const data = JSON.parse(rawData);
             if (data.error) throw new Error(data.error);
+
+            // Fix Date formats that Google Sheets might have modified (converted to UTC ISO strings)
+            const fixDate = (dateStr) => {
+               if (!dateStr) return dateStr;
+               const str = String(dateStr);
+               if (str.includes('T')) {
+                  const d = new Date(str);
+                  if (!isNaN(d.getTime())) {
+                     const year = d.getFullYear();
+                     const month = String(d.getMonth() + 1).padStart(2, '0');
+                     const day = String(d.getDate()).padStart(2, '0');
+                     return `${year}-${month}-${day}`;
+                  }
+               }
+               return str.split('T')[0];
+            };
+            
+            if (data.attendance) data.attendance = data.attendance.map(a => ({...a, date: fixDate(a.date)}));
+            if (data.behaviors) data.behaviors = data.behaviors.map(b => ({...b, date: fixDate(b.date)}));
+
             setStudents(data.students || []); setSubjects(data.subjects || []);
             setEnrollments(data.enrollments || []); setAssignments(data.assignments || []);
             setSubmissions(data.submissions || []); setAttendance(data.attendance || []);
@@ -187,9 +207,9 @@ export default function App() {
     if (userObj.role === 'student') {
       const now = new Date().toLocaleString('th-TH');
       const updatedStudent = { ...userObj.data, lastLogin: now };
-      const newStudents = students.map(s => String(s.id) === String(updatedStudent.id) ? updatedStudent : s);
+      const newStudents = students.map(s => String(s.id).trim() === String(updatedStudent.id).trim() ? updatedStudent : s);
       setStudents(newStudents);
-      saveState({ students: newStudents });
+      // ยกเลิกการเรียก saveState ตรงนี้ เพื่อไม่ให้เกิดปัญหานักเรียนล็อกอินแล้วเซฟข้อมูลเก่าทับฐานข้อมูลเพื่อน
       setCurrentUser({ role: 'student', data: updatedStudent });
     } else {
       setCurrentUser(userObj);
@@ -207,7 +227,7 @@ export default function App() {
 
   let mySubjects = subjects; let myAssignments = assignments;
   if (liveUser.role === 'student') {
-    const mySubjectIds = enrollments.filter(e => e.studentId === liveUser.data.id).map(e => e.subjectId);
+    const mySubjectIds = enrollments.filter(e => String(e.studentId).trim() === String(liveUser.data.id).trim()).map(e => e.subjectId);
     mySubjects = subjects.filter(s => mySubjectIds.includes(s.id));
     myAssignments = assignments.filter(a => mySubjectIds.includes(a.subjectId));
   }
@@ -1139,7 +1159,8 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
   useEffect(() => {
     let initialStatus = {};
     targetStudents.forEach(s => {
-      const existingRecord = attendance.find(a => a.studentId === s.id && a.subjectId === selectedSub && a.date === date);
+      // แก้ไขการเปรียบเทียบรหัสให้เป็น String เสมอ
+      const existingRecord = attendance.find(a => String(a.studentId).trim() === String(s.id).trim() && String(a.subjectId).trim() === String(selectedSub).trim() && String(a.date).trim() === String(date).trim());
       initialStatus[s.id] = existingRecord ? existingRecord.status : 'present';
     });
     setTempStatus(initialStatus);
@@ -1153,7 +1174,7 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
 
     targetStudents.forEach(s => {
       const status = tempStatus[s.id] || 'present';
-      const existingIndex = newAttendance.findIndex(a => a.studentId === s.id && a.subjectId === selectedSub && a.date === date);
+      const existingIndex = newAttendance.findIndex(a => String(a.studentId).trim() === String(s.id).trim() && String(a.subjectId).trim() === String(selectedSub).trim() && String(a.date).trim() === String(date).trim());
       if (existingIndex >= 0) {
         if (newAttendance[existingIndex].status !== status) { newAttendance[existingIndex].status = status; changesMade = true; }
       } else {
@@ -1259,7 +1280,7 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
       csv += `="${stu.room}","${stu.section || ''}",${stu.number},="${stu.id}","${stu.name}",`;
       
       allDatesInMonth.forEach(date => {
-        const record = attendance.find(a => a.studentId === stu.id && a.subjectId === filterSub && a.date === date);
+        const record = attendance.find(a => String(a.studentId).trim() === String(stu.id).trim() && String(a.subjectId).trim() === String(filterSub).trim() && String(a.date).trim() === String(date).trim());
         if (record) counts[record.status]++;
         const statusTxt = record ? (record.status === 'present' ? 'ม' : record.status === 'late' ? 'ส' : record.status === 'leave' ? 'ล' : 'ข') : '-';
         csv += `${statusTxt},`;
@@ -1311,7 +1332,7 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
                     <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.number}</td>
                     <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><span className="text-blue-500 mr-2 font-mono">{stu.id}</span>{stu.name}</td>
                     {allDatesInMonth.map(date => {
-                      const record = attendance.find(a => a.studentId === stu.id && a.subjectId === filterSub && a.date === date);
+                      const record = attendance.find(a => String(a.studentId).trim() === String(stu.id).trim() && String(a.subjectId).trim() === String(filterSub).trim() && String(a.date).trim() === String(date).trim());
                       if (record) counts[record.status]++;
                       const statusInfo = getStatusText(record?.status);
                       return (<td key={date} className={`p-2 text-center font-black border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{record ? <span className={`w-8 h-8 flex items-center justify-center rounded-lg mx-auto ${statusInfo.color}`}>{statusInfo.text}</span> : <span className="text-slate-400">-</span>}</td>);
@@ -1358,7 +1379,7 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
 
     if (isNaN(pts) || !rem) return showToast('กรุณากรอกคะแนนพฤติกรรม (เป็นตัวเลข) และพิมพ์หมายเหตุให้ครบถ้วน');
 
-    setBehaviors([...behaviors, { id: `b${Date.now()}_${Math.random()}`, subjectId: selectedSub, studentId, date, points: pts, remark: rem }]);
+    setBehaviors([...behaviors, { id: `b${Date.now()}_${Math.random()}`, subjectId: selectedSub, studentId: String(studentId).trim(), date, points: pts, remark: rem }]);
     ptsInput.value = ''; remInput.value = '';
     showToast(`บันทึกพฤติกรรม ${pts > 0 ? '+'+pts : pts} คะแนน ให้รหัส ${studentId} สำเร็จ`);
   };
@@ -1435,7 +1456,16 @@ function TeacherMaterials({ subjects, materials, setMaterials, dbUrl, showToast,
         const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
         const data = await res.json();
         if (data.url) {
-           setMaterials([{ id: `m${Date.now()}`, ...form, fileName: file.name, url: data.url, uploadedAt: new Date().toISOString().split('T')[0] }, ...materials]);
+           // ป้องกัน stale closure ดึงข้อมูลล่าสุดจาก local 
+           let latestMats = materials;
+           try {
+               const localStr = localStorage.getItem('kasem_local_data');
+               if (localStr) {
+                   const localData = JSON.parse(localStr);
+                   if (localData && localData.materials) latestMats = localData.materials;
+               }
+           } catch(e) {}
+           setMaterials([{ id: `m${Date.now()}`, ...form, fileName: file.name, url: data.url, uploadedAt: new Date().toISOString().split('T')[0] }, ...latestMats]);
            showToast('อัปโหลดไฟล์ไปที่ Google Drive แล้ว');
            setFile(null); setForm({ ...form, title: '', description: '' });
         }
@@ -1533,7 +1563,16 @@ function TeacherAssignments({ assignments, setAssignments, subjects, showToast, 
       }
     }
 
-    setAssignments([{ ...newAsg, id: `a${Date.now()}`, imageUrl: uploadedImageUrl }, ...assignments]);
+    let latestAsgs = assignments;
+    try {
+        const localStr = localStorage.getItem('kasem_local_data');
+        if (localStr) {
+            const localData = JSON.parse(localStr);
+            if (localData && localData.assignments) latestAsgs = localData.assignments;
+        }
+    } catch(e) {}
+
+    setAssignments([{ ...newAsg, id: `a${Date.now()}`, imageUrl: uploadedImageUrl }, ...latestAsgs]);
     setShowForm(false); showToast('สร้างงานใหม่สำเร็จ');
     setNewAsg({ subjectId: subjects[0]?.id || '', title: '', description: '', maxScore: 10, dueDate: '', targetRoom: 'all', linkUrl: '' });
     setImageFile(null);
@@ -1836,7 +1875,7 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
   const maxScore = examType === 'midterm' ? (subObj?.midtermMax ?? 20) : (subObj?.finalMax ?? 30);
   const examLabel = examType === 'midterm' ? 'กลางภาค' : 'ปลายภาค';
 
-  const getExamRecord = (studentId) => exams.find(e => e.studentId === studentId && e.subjectId === filterSub) || { midterm: '', final: '' };
+  const getExamRecord = (studentId) => exams.find(e => String(e.studentId).trim() === String(studentId).trim() && String(e.subjectId).trim() === String(filterSub).trim()) || { midterm: '', final: '' };
 
   const handleBatchSave = () => {
      let updatedExams = [...exams];
@@ -1848,7 +1887,7 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
         const scoreVal = parseFloat(inputEl.value);
         if (isNaN(scoreVal)) return;
 
-        const existingIdx = updatedExams.findIndex(e => e.studentId === s.id && e.subjectId === filterSub);
+        const existingIdx = updatedExams.findIndex(e => String(e.studentId).trim() === String(s.id).trim() && String(e.subjectId).trim() === String(filterSub).trim());
         
         if (existingIdx >= 0) {
            updatedExams[existingIdx] = { ...updatedExams[existingIdx], [examType]: scoreVal };
@@ -1953,13 +1992,13 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
   const matrix = targetSts.map(stu => {
     let asgTotal = 0;
     const scores = targetAsgs.reduce((acc, asg) => {
-      const sub = submissions.find(s => s.studentId === stu.id && s.assignmentId === asg.id);
+      const sub = submissions.find(s => String(s.studentId).trim() === String(stu.id).trim() && s.assignmentId === asg.id);
       const score = (sub && sub.status === 'graded') ? sub.score : 0;
       asgTotal += score; acc[asg.id] = score; return acc;
     }, {});
     
-    const examRec = exams.find(e => e.studentId === stu.id && e.subjectId === filterSub) || { midterm: 0, final: 0 };
-    const behaviorTotal = behaviors.filter(b => b.subjectId === filterSub && b.studentId === stu.id).reduce((sum, b) => sum + b.points, 0);
+    const examRec = exams.find(e => String(e.studentId).trim() === String(stu.id).trim() && e.subjectId === filterSub) || { midterm: 0, final: 0 };
+    const behaviorTotal = behaviors.filter(b => b.subjectId === filterSub && String(b.studentId).trim() === String(stu.id).trim()).reduce((sum, b) => sum + b.points, 0);
     const grandTotal = asgTotal + (examRec.midterm || 0) + (examRec.final || 0);
 
     return { ...stu, scores, asgTotal, mid: examRec.midterm || 0, fin: examRec.final || 0, behaviorTotal, grandTotal };
@@ -2007,34 +2046,38 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
                 <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ห้อง</th>
                 <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ตอน</th>
                 <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">เลขที่</th>
-                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">รหัส / ชื่อ-สกุล</th>
-                <th className={`p-2 text-center border-r border-b ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`} colSpan={targetAsgs.length || 1}>คะแนนเก็บ (งาน)</th>
-                <th className={`p-2 text-center border-r border-b ${isDark ? 'border-slate-700 bg-amber-900/20 text-amber-500' : 'border-slate-200 bg-amber-50 text-amber-700'}`} colSpan="2">คะแนนสอบ</th>
-                <th className={`p-4 text-center border-r ${isDark ? 'border-slate-700 bg-slate-900/80 text-white' : 'border-slate-200 bg-slate-100 text-slate-800'}`} rowSpan="2">รวมสุทธิ<br/><span className="text-xs font-normal">(เต็ม {maxGrandTotal})</span></th>
-                <th className={`p-4 text-center ${isDark ? 'bg-green-900/20 text-green-400' : 'bg-green-50 text-green-700'}`} rowSpan="2">พฤติกรรม<br/><span className="text-xs font-normal">(คะแนนพิเศษ)</span></th>
+                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">รหัส</th>
+                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ชื่อ-สกุล</th>
+                {targetAsgs.map(a => <th key={a.id} className={`p-4 text-center border-r text-xs whitespace-nowrap ${isDark ? 'border-slate-700 bg-blue-900/20 text-blue-400' : 'border-slate-200 bg-blue-50 text-blue-700'}`} rowSpan="2">{a.title}<br/><span className={`font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>(เต็ม {a.maxScore})</span></th>)}
+                {targetAsgs.length === 0 && <th className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ไม่มีงาน</th>}
+                <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-emerald-900/20 text-emerald-400' : 'border-slate-200 bg-emerald-50 text-emerald-700'}`} colSpan="4">สรุปคะแนน (เต็ม {maxGrandTotal})</th>
+                <th className={`p-4 text-center border-r ${isDark ? 'border-slate-700 bg-violet-900/20 text-violet-400' : 'border-slate-200 bg-violet-50 text-violet-700'}`} rowSpan="2">พฤติกรรม</th>
               </tr>
               <tr>
-                {targetAsgs.length === 0 && <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`}>-</th>}
-                {targetAsgs.map(a => <th key={a.id} className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`}><div className="truncate w-20 mx-auto" title={a.title}>{a.title}</div><div className="text-blue-500 mt-1 font-bold">เต็ม {a.maxScore}</div></th>)}
-                <th className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700 bg-amber-900/20 text-amber-400' : 'border-slate-200 bg-amber-50 text-amber-600'}`}>กลางภาค ({maxMid})</th>
-                <th className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700 bg-amber-900/20 text-amber-400' : 'border-slate-200 bg-amber-50 text-amber-600'}`}>ปลายภาค ({maxFin})</th>
+                <th className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รวมงาน<br/>({maxAsgTotal})</th>
+                <th className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>กลางภาค<br/>({maxMid})</th>
+                <th className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ปลายภาค<br/>({maxFin})</th>
+                <th className={`p-2 text-center border-r text-xs font-black ${isDark ? 'border-slate-700 text-emerald-400' : 'border-slate-200 text-emerald-600'}`}>รวมสุทธิ</th>
               </tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
-              {matrix.map((row) => (
+              {matrix.map(row => (
                 <tr key={row.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/40'}`}>
-                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.room}</td>
-                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.section || '-'}</td>
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>{row.room}</td>
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>{row.section || '-'}</td>
                   <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.number}</td>
-                  <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><span className="text-blue-500 mr-2 font-mono">{row.id}</span>{row.name}</td>
-                  {targetAsgs.length === 0 && <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>-</td>}
-                  {targetAsgs.map(a => <td key={a.id} className={`p-4 text-center font-black border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.scores[a.id] > 0 ? <span className="text-emerald-500">{row.scores[a.id]}</span> : <span className="text-slate-500">-</span>}</td>)}
-                  <td className={`p-4 text-center font-black text-amber-500 border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.mid > 0 ? row.mid : '-'}</td>
-                  <td className={`p-4 text-center font-black text-amber-500 border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.fin > 0 ? row.fin : '-'}</td>
-                  <td className={`p-4 text-center font-black text-blue-500 text-lg border-r shadow-[-2px_0_5px_rgba(0,0,0,0.02)] sticky right-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>{row.grandTotal}</td>
-                  <td className="p-4 text-center font-black text-lg"><span className={row.behaviorTotal > 0 ? 'text-green-500' : row.behaviorTotal < 0 ? 'text-red-500' : 'text-slate-500'}>{row.behaviorTotal > 0 ? `+${row.behaviorTotal}` : row.behaviorTotal}</span></td>
+                  <td className={`p-4 font-mono font-bold text-blue-500 border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.id}</td>
+                  <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.name}</td>
+                  {targetAsgs.map(a => <td key={a.id} className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.scores[a.id]}</td>)}
+                  {targetAsgs.length === 0 && <td className={`p-4 text-center border-r text-slate-400 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>-</td>}
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.asgTotal}</td>
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.mid}</td>
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.fin}</td>
+                  <td className={`p-4 text-center font-black text-emerald-500 border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.grandTotal}</td>
+                  <td className={`p-4 text-center font-bold ${row.behaviorTotal > 0 ? 'text-emerald-500' : row.behaviorTotal < 0 ? 'text-red-500' : (isDark ? 'text-slate-400' : 'text-slate-500')}`}>{row.behaviorTotal > 0 ? `+${row.behaviorTotal}` : row.behaviorTotal}</td>
                 </tr>
               ))}
+              {matrix.length === 0 && <tr><td colSpan={12 + targetAsgs.length} className="text-center p-8 font-bold text-slate-500">ไม่พบนักเรียนในวิชาและห้องนี้</td></tr>}
             </tbody>
           </table>
         </div>
@@ -2043,97 +2086,90 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
   );
 }
 
-function TeacherProfile({ teacherProfile, setTeacherProfile, dbUrl, setDbUrl, showToast, theme, setTheme }) {
-  const [form, setForm] = useState({ name: teacherProfile.name, password: teacherProfile.password, confirm: teacherProfile.password });
-  const [urlInput, setUrlInput] = useState(dbUrl);
-  const [profileImg, setProfileImg] = useState(teacherProfile.profileImg);
+function TeacherProfile({ teacherProfile, setTeacherProfile, dbUrl, setDbUrl, theme, setTheme, showToast }) {
   const isDark = theme === 'dark';
+  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
 
-  const handleImageChange = async (e) => {
-    const file = e.target.files[0];
-    if(!file) return;
-
-    showToast('กำลังบันทึกรูปภาพ... กรุณารอสักครู่');
-    const resized = await resizeImage(file);
-    if (resized) {
-      setProfileImg(resized);
-      setTeacherProfile({ ...teacherProfile, profileImg: resized });
-      showToast('อัปเดตรูปประจำตัวสำเร็จแล้ว');
-    }
-  };
+  const [form, setForm] = useState(teacherProfile);
+  const [dbInput, setDbInput] = useState(dbUrl || '');
 
   const handleSaveProfile = (e) => {
     e.preventDefault();
-    if(form.password !== form.confirm) return showToast('รหัสผ่านไม่ตรงกัน');
-    setTeacherProfile({ ...teacherProfile, name: form.name, password: form.password }); showToast('อัปเดตข้อมูลแอดมินสำเร็จ');
-  }
+    setTeacherProfile(form);
+    showToast('บันทึกโปรไฟล์ส่วนตัวเรียบร้อย');
+  };
 
-  const handleSaveDb = async (e) => {
+  const handleSaveDb = (e) => {
     e.preventDefault();
-    if (!urlInput.includes('/exec')) return showToast('URL ไม่ถูกต้อง (ต้องลงท้ายด้วย /exec)');
-    
-    showToast('กำลังทดสอบการเชื่อมต่อและดึงข้อมูล...');
-    try {
-      const res = await fetch(urlInput);
-      const rawData = await res.text();
-      
-      if (rawData.trim().startsWith('<')) {
-        return showToast('การเชื่อมต่อถูกปฏิเสธ: โปรดตรวจสอบว่าตั้งค่าสิทธิ์ Anyone (ทุกคน) หรือยัง');
-      }
-      
-      setDbUrl(urlInput);
-      safeSetItem('kasem_db_url', urlInput);
-      showToast('เชื่อมต่อและดึงข้อมูลกลับมาสำเร็จ!');
-    } catch (err) {
-      showToast('URL ไม่ถูกต้อง หรือไม่สามารถเชื่อมต่อได้');
-    }
-  }
+    setDbUrl(dbInput);
+    showToast('บันทึกการตั้งค่าฐานข้อมูลเรียบร้อย');
+  };
 
-  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
+  const handleImageChange = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const resized = await resizeImage(file);
+      setForm({ ...form, profileImg: resized });
+    }
+  };
 
   return (
-     <div className="max-w-4xl mx-auto space-y-8 pb-10">
-       <div className={`border rounded-3xl p-6 shadow-sm flex items-center justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-         <div><h3 className="text-xl font-black mb-1 flex items-center"><Moon className="mr-3 text-blue-500"/> รูปแบบหน้าจอ (Theme)</h3><p className={`text-sm font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>ปรับโทนสีสว่าง/มืดตามอุปกรณ์</p></div>
-         <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className={`p-4 rounded-full font-bold shadow-md transition-all ${isDark ? 'bg-amber-400 text-slate-900' : 'bg-slate-800 text-white'}`}>{theme === 'dark' ? <Sun size={24}/> : <Moon size={24}/>}</button>
-       </div>
-
-       <div className={`border rounded-3xl p-6 md:p-8 shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-         <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><Cloud className="mr-3 text-blue-500"/> ฐานข้อมูล (Google Sheets)</h3>
-         <form onSubmit={handleSaveDb} className="flex flex-col md:flex-row gap-4">
-            <input type="text" value={urlInput} onChange={e => setUrlInput(e.target.value)} placeholder="วางลิงก์ Web App URL จาก Google Apps Script (ลงท้ายด้วย /exec)" className={inputClass} />
-            <button type="submit" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md whitespace-nowrap">บันทึก & ดึงข้อมูล</button>
-         </form>
-         <p className={`text-xs mt-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>* ระบบจะไม่เด้งออกแล้วเมื่อกดบันทึก ข้อมูลทั้งหมดจะซิงค์กลับมาให้ทันทีเบื้องหลัง</p>
-       </div>
-
-       <div className={`border rounded-3xl p-6 md:p-8 shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-         <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><Settings className="mr-3 text-blue-500"/> โปรไฟล์และการตั้งค่าแอดมิน</h3>
-         <div className="flex flex-col md:flex-row gap-8">
-            <div className="shrink-0 flex flex-col items-center">
-               <div className={`w-32 h-32 rounded-full border-4 shadow-lg relative group overflow-hidden flex justify-center items-center ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-100 border-white'}`}>
-                  {profileImg ? <img src={getValidImgUrl(profileImg)} className="w-full h-full object-cover rounded-full" /> : <User size={48} className="text-slate-400"/>}
-                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer transition-opacity"><Camera className="text-white" size={32} /><input type="file" accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer"/></div>
-               </div>
-               <span className="text-xs font-bold text-slate-400 mt-3">คลิกที่รูปเพื่อเปลี่ยน</span>
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* Profile Settings */}
+        <div className={`p-6 md:p-8 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <h2 className="text-xl font-black mb-6 flex items-center border-l-4 border-blue-500 pl-3"><Settings className="mr-2 text-blue-500"/> ตั้งค่าโปรไฟล์ผู้สอน</h2>
+          <form onSubmit={handleSaveProfile} className="space-y-5">
+            <div className="flex flex-col items-center mb-6 relative">
+              <div className={`w-32 h-32 rounded-full overflow-hidden mb-3 border-4 shadow-md ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
+                {form.profileImg ? <img src={getValidImgUrl(form.profileImg)} className="w-full h-full object-cover" /> : <User size={48} className="w-full h-full p-6 text-slate-300" />}
+              </div>
+              <label className="cursor-pointer bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900 px-4 py-2 rounded-full text-sm font-bold flex items-center transition-colors">
+                <Camera size={16} className="mr-2"/> เปลี่ยนรูป
+                <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+              </label>
             </div>
-            <form onSubmit={handleSaveProfile} className="flex-1 space-y-5">
-               <div><label className="block text-sm font-bold mb-2">ชื่อผู้สอน (แสดงผล)</label><input required type="text" value={form.name} onChange={e=>setForm({...form, name: e.target.value})} className={inputClass} /></div>
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div><label className="block text-sm font-bold mb-2">รหัสผ่าน</label><input type="password" value={form.password} onChange={e=>setForm({...form, password: e.target.value})} className={inputClass} /></div>
-                  <div><label className="block text-sm font-bold mb-2">ยืนยันรหัสผ่าน</label><input type="password" value={form.confirm} onChange={e=>setForm({...form, confirm: e.target.value})} className={inputClass} /></div>
+            <div><label className="block text-sm font-bold mb-2">ชื่อผู้สอน</label><input required type="text" value={form.name} onChange={e=>setForm({...form, name: e.target.value})} className={inputClass} /></div>
+            <div><label className="block text-sm font-bold mb-2">รหัสผ่านสำหรับเข้าสู่ระบบแอดมิน</label><input required type="password" value={form.password} onChange={e=>setForm({...form, password: e.target.value})} className={inputClass} /></div>
+            <button type="submit" className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-colors">บันทึกโปรไฟล์</button>
+          </form>
+        </div>
+
+        {/* System Settings */}
+        <div className="space-y-6">
+          <div className={`p-6 md:p-8 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+             <h2 className="text-xl font-black mb-6 flex items-center border-l-4 border-emerald-500 pl-3"><Cloud className="mr-2 text-emerald-500"/> ตั้งค่าฐานข้อมูล (Google Apps Script)</h2>
+             <form onSubmit={handleSaveDb} className="space-y-5">
+               <div>
+                  <label className="block text-sm font-bold mb-2 text-slate-500">Web App URL</label>
+                  <input type="text" value={dbInput} onChange={e=>setDbInput(e.target.value)} className={inputClass} placeholder="https://script.google.com/macros/s/.../exec" />
                </div>
-               <div className="pt-2 flex justify-end"><button type="submit" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md">บันทึกข้อมูล</button></div>
-            </form>
-         </div>
-       </div>
-     </div>
+               <button type="submit" className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md transition-colors">บันทึก URL ฐานข้อมูล</button>
+               <p className={`text-xs mt-3 p-3 rounded-lg border ${isDark ? 'bg-amber-900/20 text-amber-400 border-amber-900/50' : 'bg-amber-50 text-amber-700 border-amber-200'}`}><AlertCircle size={14} className="inline mr-1"/> หมายเหตุ: หากเว้นว่างไว้ ระบบจะทำงานแบบ Offline (ข้อมูลเซฟแค่ในเครื่องนี้เท่านั้น)</p>
+             </form>
+          </div>
+
+          <div className={`p-6 rounded-3xl shadow-sm border flex items-center justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+             <div>
+                <h3 className="font-black text-lg mb-1">โหมดการแสดงผล</h3>
+                <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>ปรับเปลี่ยนธีมสว่าง / มืด</p>
+             </div>
+             <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className={`p-4 rounded-2xl transition-all shadow-inner ${isDark ? 'bg-slate-900 text-blue-400 border border-slate-700' : 'bg-slate-100 text-amber-500 border border-slate-200'}`}>
+                {theme === 'dark' ? <Moon size={24} /> : <Sun size={24} />}
+             </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
   );
 }
 
 // ==========================================
 // STUDENT VIEWS
 // ==========================================
+
 function StudentView(props) {
   switch(props.activeTab) {
     case 'dashboard': return <StudentDashboard {...props} />;
@@ -2155,305 +2191,265 @@ function StudentDashboard({ student, subjects, assignments, submissions, setActi
   );
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div className={`rounded-3xl p-6 md:p-8 flex flex-col md:flex-row items-center md:items-start text-center md:text-left shadow-lg relative overflow-hidden bg-gradient-to-br ${isDark ? 'from-blue-900 to-indigo-900 border border-blue-800' : 'from-blue-600 to-cyan-500 border border-blue-500'}`}>
-        <div className="w-24 h-24 rounded-full bg-slate-800 border-4 border-white/30 flex items-center justify-center text-4xl font-black text-white shrink-0 mb-4 md:mb-0 shadow-lg relative z-10 overflow-hidden">
-          {student.profileImg ? <img src={getValidImgUrl(student.profileImg)} className="w-full h-full object-cover rounded-full"/> : student.name.charAt(0)}
-        </div>
-        <div className="md:ml-8 relative z-10 text-white">
-          <h2 className="text-3xl font-black mb-3">{student.name}</h2>
-          <div className="flex flex-wrap justify-center md:justify-start gap-2">
-            <span className="bg-white/20 backdrop-blur-sm px-4 py-1.5 rounded-xl font-mono font-bold text-sm shadow-sm border border-white/10">รหัส {student.id}</span>
-            <span className="bg-white/20 backdrop-blur-sm px-4 py-1.5 rounded-xl font-bold text-sm shadow-sm border border-white/10">ห้อง {student.room} {student.section ? `(${student.section})` : ''} | เลขที่ {student.number}</span>
-          </div>
-          <p className="text-sm font-bold mt-5 flex items-center justify-center md:justify-start"><Layers size={16} className="mr-2"/> ลงทะเบียนเรียน {subjects.length} วิชา</p>
-        </div>
+      <div className={`p-6 md:p-8 rounded-3xl shadow-sm text-white overflow-hidden relative ${isDark ? 'bg-gradient-to-br from-blue-900 to-indigo-900' : 'bg-gradient-to-br from-blue-600 to-indigo-700'}`}>
+        <div className="absolute top-0 right-0 p-8 opacity-10"><User size={120} /></div>
+        <h1 className="text-3xl font-black mb-2 relative z-10">สวัสดี, {student.name}! 👋</h1>
+        <p className="text-blue-100 font-medium relative z-10">ห้อง {student.room} | เลขที่ {student.number}</p>
       </div>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-8">
-        <div className={`p-8 rounded-3xl border flex flex-col items-center justify-center cursor-pointer transition-all shadow-sm hover:border-amber-500 group relative overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`} onClick={() => setActiveTab('assignments')}>
-          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><AlertCircle size={100}/></div>
-          <AlertCircle className="text-amber-500 mb-4" size={40} />
-          <h3 className="text-xl font-black">งานที่ยังไม่ส่ง</h3>
-          <p className="text-5xl font-black text-amber-500 mt-2">{pendingAsgs.length} <span className="text-lg font-bold opacity-60">ชิ้น</span></p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mt-6">
+        <div onClick={() => setActiveTab('subjects')} className={`p-6 rounded-3xl shadow-sm border cursor-pointer transition-transform hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-blue-100'}`}>
+          <div className="flex justify-between items-center"><h3 className={`font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>วิชาที่เรียน</h3><div className={`p-3 rounded-2xl ${isDark ? 'bg-slate-900' : 'bg-blue-50'}`}><Layers className="text-blue-500"/></div></div>
+          <p className="text-3xl font-black mt-4 text-blue-500">{subjects.length} <span className="text-sm font-bold text-slate-400">วิชา</span></p>
         </div>
-        <div className={`p-8 rounded-3xl border flex flex-col items-center justify-center cursor-pointer transition-all shadow-sm hover:border-emerald-500 group relative overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`} onClick={() => setActiveTab('scores')}>
-          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><BarChart2 size={100}/></div>
-          <BarChart2 className="text-emerald-500 mb-4" size={40} />
-          <h3 className="text-xl font-black">สรุปคะแนน</h3>
-          <p className={`text-sm font-bold mt-4 px-5 py-2.5 rounded-xl ${isDark ? 'bg-emerald-900/30 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>คลิกเพื่อดูคะแนน</p>
+        <div onClick={() => setActiveTab('assignments')} className={`p-6 rounded-3xl shadow-sm border cursor-pointer transition-transform hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-amber-100'}`}>
+          <div className="flex justify-between items-center"><h3 className={`font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>งานที่ต้องส่ง</h3><div className={`p-3 rounded-2xl ${isDark ? 'bg-slate-900' : 'bg-amber-50'}`}><BookOpen className="text-amber-500"/></div></div>
+          <p className="text-3xl font-black mt-4 text-amber-500">{pendingAsgs.length} <span className="text-sm font-bold text-slate-400">ชิ้น</span></p>
+        </div>
+        <div onClick={() => setActiveTab('scores')} className={`p-6 rounded-3xl shadow-sm border cursor-pointer transition-transform hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-emerald-100'}`}>
+          <div className="flex justify-between items-center"><h3 className={`font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>สรุปคะแนน</h3><div className={`p-3 rounded-2xl ${isDark ? 'bg-slate-900' : 'bg-emerald-50'}`}><BarChart2 className="text-emerald-500"/></div></div>
+          <p className="text-lg font-black mt-5 text-emerald-500 flex items-center">คลิกดูคะแนน <ArrowUpDown size={16} className="ml-2"/></p>
         </div>
       </div>
     </div>
   );
 }
 
-function StudentAnnouncements({ student, subjects, announcements, theme }) {
+function StudentAnnouncements({ announcements, student, enrollments, subjects, theme }) {
   const isDark = theme === 'dark';
-  const mySubIds = subjects.map(s => s.id);
-  
-  const visibleAnnouncements = announcements.filter(ann => {
-    if (ann.targetSubject && ann.targetSubject !== 'all' && !mySubIds.includes(ann.targetSubject)) return false;
-    if (ann.targetRoom && ann.targetRoom !== 'all' && String(ann.targetRoom).trim() !== String(student.room).trim()) return false;
-    return true;
+  const mySubjectIds = enrollments.filter(e => String(e.studentId).trim() === String(student.id).trim()).map(e => e.subjectId);
+  const myAnnouncements = announcements.filter(ann => {
+     if (ann.targetSubject !== 'all' && !mySubjectIds.includes(ann.targetSubject)) return false;
+     if (ann.targetRoom !== 'all' && String(ann.targetRoom).trim() !== String(student.room).trim()) return false;
+     return true;
   });
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <h2 className="text-2xl font-black border-l-4 border-blue-500 pl-4 mb-6">ประกาศข่าวสาร</h2>
+      <h2 className="text-2xl font-black mb-6 border-l-4 border-blue-600 pl-4">ประกาศข่าวสาร</h2>
       <div className="space-y-5">
-        {visibleAnnouncements.map(ann => (
-          <div key={ann.id} className={`p-6 md:p-8 rounded-3xl shadow-sm border border-l-8 border-l-blue-500 flex flex-col md:flex-row gap-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            {ann.imageUrl && (
-              <div className="w-full md:w-64 h-40 shrink-0 rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
-                <img src={getValidImgUrl(ann.imageUrl)} alt="Announcement" className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"/>
-              </div>
-            )}
-            <div className="flex-1 flex flex-col">
-              <h3 className="text-xl font-black mb-3 text-blue-600 dark:text-blue-400">{ann.title}</h3>
-              <p className={`whitespace-pre-wrap font-medium mb-5 flex-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{ann.content}</p>
-              
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-auto">
-                <div className={`text-xs font-bold flex items-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                  <Clock size={14} className="mr-1"/> {ann.date}
+        {myAnnouncements.map(ann => {
+          const sub = subjects.find(s => s.id === ann.targetSubject);
+          return (
+            <div key={ann.id} className={`p-6 rounded-3xl shadow-sm border flex flex-col sm:flex-row gap-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              {ann.imageUrl && (
+                <div className="w-full sm:w-48 h-40 shrink-0 rounded-2xl overflow-hidden border border-slate-200 shadow-sm"><img src={getValidImgUrl(ann.imageUrl)} alt="Announcement" className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"/></div>
+              )}
+              <div className="flex-1 flex flex-col">
+                <div className="flex flex-wrap gap-2 mb-3">
+                   <div className={`text-xs font-bold flex items-center px-2 py-1 rounded-md ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-slate-100 text-slate-500'}`}><Clock size={12} className="mr-1.5"/> {ann.date}</div>
+                   {ann.targetSubject !== 'all' && <div className="text-xs font-bold text-white bg-blue-500 px-3 py-1 rounded-md shadow-sm">{sub?.name}</div>}
                 </div>
+                <h3 className="text-xl font-black mb-3 text-blue-600 dark:text-blue-400">{ann.title}</h3>
+                <p className={`whitespace-pre-wrap font-medium mb-5 flex-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{ann.content}</p>
                 {ann.linkUrl && (
-                  <a href={ann.linkUrl.startsWith('http') ? ann.linkUrl : `https://${ann.linkUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded-xl transition-colors shadow-sm">
-                    <ExternalLink size={14} className="mr-2"/> เปิดลิงก์แนบ
-                  </a>
+                  <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-700"><a href={ann.linkUrl.startsWith('http') ? ann.linkUrl : `https://${ann.linkUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><ExternalLink size={14} className="mr-2"/> เปิดลิงก์แนบ</a></div>
                 )}
               </div>
             </div>
-          </div>
-        ))}
-        {visibleAnnouncements.length === 0 && <div className={`text-center py-16 rounded-3xl border font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีประกาศข่าวสารใหม่</div>}
+          );
+        })}
+        {myAnnouncements.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีประกาศข่าวสารใหม่</div>}
       </div>
     </div>
   );
 }
 
 function StudentMaterials({ subjects, materials, theme }) {
-  const [searchQuery, setSearchQuery] = useState('');
   const isDark = theme === 'dark';
-  const mySubIds = subjects.map(s => s.id);
-  const myMats = materials.filter(m => 
-    mySubIds.includes(m.subjectId) && 
-    (String(m.title || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
-     String(m.description || '').toLowerCase().includes(searchQuery.toLowerCase()))
-  );
-
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-         <h2 className="text-2xl font-black border-l-4 border-blue-500 pl-4">คลังสื่อการเรียน / ใบงาน</h2>
-         <div className="relative w-full sm:w-auto">
-           <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} size={18} />
-           <input type="text" placeholder="ค้นหาใบงาน..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className={`pl-10 pr-4 py-2.5 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200'}`} />
-         </div>
-       </div>
-       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-         {myMats.map(m => {
-            const sub = subjects.find(s => s.id === m.subjectId);
-            return (
-              <div key={m.id} className={`p-6 rounded-3xl shadow-sm flex flex-col justify-between border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                <div>
-                  <div className="text-xs bg-blue-500/10 text-blue-500 font-bold px-3 py-1.5 rounded-lg inline-block mb-3">{sub?.name}</div>
-                  <h4 className="font-black text-xl">{m.title}</h4>
-                  <p className={`text-sm my-3 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m.description}</p>
+    <div className="max-w-4xl mx-auto space-y-6">
+      <h2 className="text-2xl font-black mb-6 border-l-4 border-blue-600 pl-4">คลังสื่อการเรียน / ใบงาน</h2>
+      {subjects.map(sub => {
+        const subMats = materials.filter(m => m.subjectId === sub.id);
+        if(subMats.length === 0) return null;
+        return (
+          <div key={sub.id} className="mb-8">
+            <h3 className={`font-black text-lg mb-4 flex items-center ${isDark ? 'text-slate-300' : 'text-slate-700'}`}><Layers size={18} className="mr-2 text-blue-500"/> {sub.name}</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {subMats.map(m => (
+                <div key={m.id} className={`p-5 rounded-2xl shadow-sm flex flex-col justify-between border transition-all hover:border-blue-300 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <div>
+                     <h4 className="font-black text-blue-600 dark:text-blue-400 mb-1 leading-tight">{m.title}</h4>
+                     <p className={`text-xs mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m.description || 'ไม่มีคำอธิบายเพิ่มเติม'}</p>
+                  </div>
+                  <div className={`pt-3 border-t flex justify-between items-center mt-2 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                     <span className="text-[10px] text-slate-400 font-bold">{m.uploadedAt}</span>
+                     <a href={m.url} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 px-4 py-2 rounded-lg flex items-center transition-colors"><DownloadCloud size={14} className="mr-1.5"/> เปิดเอกสาร</a>
+                  </div>
                 </div>
-                <div className={`mt-4 pt-4 border-t text-right ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                  <a href={m.url} target="_blank" rel="noreferrer" className="inline-flex items-center px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-colors"><DownloadCloud size={16} className="mr-2"/> เปิดดูเอกสาร</a>
-                </div>
-              </div>
-            )
-         })}
-         {myMats.length === 0 && <div className={`col-span-full text-center py-16 rounded-3xl border font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ไม่พบใบงานที่ค้นหา</div>}
-       </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {subjects.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>คุณยังไม่ได้ลงทะเบียนเรียนวิชาใดๆ</div>}
+      {subjects.length > 0 && materials.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีสื่อการเรียนในระบบ</div>}
     </div>
   );
 }
 
-function StudentAssignments({ student, assignments, submissions, setSubmissions, subjects, showToast, dbUrl, theme }) {
-  const [selectedAsg, setSelectedAsg] = useState(null);
+function StudentAssignments({ student, subjects, assignments, submissions, setSubmissions, showToast, dbUrl, theme }) {
   const [file, setFile] = useState(null);
-  const [linkInput, setLinkInput] = useState('');
-  const [submitMode, setSubmitMode] = useState('file'); // 'file' or 'link'
-  const [isUploading, setIsUploading] = useState(false);
-  const [filterSub, setFilterSub] = useState('all');
+  const [activeAsg, setActiveAsg] = useState(null);
+  const [submitType, setSubmitType] = useState('file');
+  const [linkUrl, setLinkUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
   const isDark = theme === 'dark';
 
-  const validAssignments = assignments.filter(a => {
-    if (a.targetRoom && a.targetRoom !== 'all' && String(a.targetRoom).trim() !== String(student.room).trim()) return false;
-    return true;
-  });
-
-  const filteredAsgs = filterSub === 'all' ? validAssignments : validAssignments.filter(a => a.subjectId === filterSub);
+  const myAsgs = assignments.filter(a => !a.targetRoom || a.targetRoom === 'all' || String(a.targetRoom).trim() === String(student.room).trim());
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitType === 'file' && !file) return showToast('กรุณาเลือกไฟล์');
+    if (submitType === 'link' && !linkUrl) return showToast('กรุณาระบุลิงก์ผลงาน');
+    if (submitType === 'file' && !dbUrl) return showToast('ระบบยังไม่พร้อมรับไฟล์ (แอดมินยังไม่ตั้งค่า DB)');
 
-    // เพิ่มการตรวจสอบว่าเคยส่งงานนี้ไปแล้วหรือยัง (ดักไว้เผื่อนักเรียนกดย้ำๆ หรือเน็ตช้า)
-    const existingSubIndex = submissions.findIndex(s => s.assignmentId === selectedAsg.id && String(s.studentId).trim() === String(student.id).trim());
+    setUploading(true);
+    let finalUrl = linkUrl;
 
-    // ฟังก์ชันช่วยบันทึก: ถ้ามีของเดิมให้เขียนทับ ถ้าไม่มีให้เพิ่มใหม่
-    const saveSubmission = (newSubData) => {
-       if (existingSubIndex >= 0) {
-           const updatedSubs = [...submissions];
-           updatedSubs[existingSubIndex] = { ...updatedSubs[existingSubIndex], ...newSubData };
-           setSubmissions(updatedSubs);
-       } else {
-           setSubmissions([...submissions, newSubData]);
-       }
-    };
-
-    if (submitMode === 'link') {
-      if (!linkInput) return showToast('กรุณากรอกลิงก์ผลงาน');
-      if (!linkInput.startsWith('http://') && !linkInput.startsWith('https://')) return showToast('ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://');
-      
-      saveSubmission({ 
-        id: existingSubIndex >= 0 ? submissions[existingSubIndex].id : `s${Date.now()}`, 
-        assignmentId: selectedAsg.id, 
-        studentId: String(student.id).trim(), 
-        status: 'submitted', 
-        score: null, 
-        fileUrl: linkInput, 
-        type: 'link', 
-        submittedAt: new Date().toLocaleString('th-TH'), 
-        submittedAtISO: new Date().toISOString() 
+    if (submitType === 'file') {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      await new Promise(resolve => {
+        reader.onload = async () => {
+          const base64 = reader.result.split(',')[1];
+          const payload = { action: 'uploadWork', filename: `${student.id}_${file.name}`, mimeType: file.type, fileData: base64 };
+          try {
+            const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+            const data = await res.json();
+            if (data.url) finalUrl = data.url;
+          } catch(err) { showToast('อัปโหลดไฟล์ล้มเหลว ตรวจสอบอินเทอร์เน็ต'); }
+          resolve();
+        };
       });
-      
-      showToast('ส่งงานในรูปแบบลิงก์เรียบร้อยแล้ว');
-      setSelectedAsg(null); setLinkInput('');
-      return;
     }
 
-    if (!file) return showToast('กรุณาเลือกไฟล์');
-    if (!dbUrl) return showToast('ระบบไม่ได้เชื่อมต่อฐานข้อมูล ครูผู้สอนยังไม่ได้เปิดระบบอัปโหลด');
-    
-    setIsUploading(true);
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = async () => {
-      const base64 = reader.result.split(',')[1];
-      const payload = { action: 'uploadSubmission', filename: `${student.id}_${file.name}`, mimeType: file.type, fileData: base64 };
+    if (finalUrl) {
+      let latestSubs = submissions;
       try {
-        const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-        const data = await res.json();
-        if(data.url) {
-          saveSubmission({ 
-            id: existingSubIndex >= 0 ? submissions[existingSubIndex].id : `s${Date.now()}`, 
-            assignmentId: selectedAsg.id, 
-            studentId: String(student.id).trim(), 
-            status: 'submitted', 
-            score: null, 
-            fileUrl: data.url, 
-            type: 'file', 
-            submittedAt: new Date().toLocaleString('th-TH'), 
-            submittedAtISO: new Date().toISOString() 
-          });
-          
-          showToast('ส่งงานเรียบร้อย บันทึกไฟล์ลง Google Drive สำเร็จ');
-          setSelectedAsg(null); setFile(null);
-        }
-      } catch (error) { showToast('อัปโหลดล้มเหลว กรุณาลองใหม่'); } finally { setIsUploading(false); }
-    };
+          const localStr = localStorage.getItem('kasem_local_data');
+          if (localStr) {
+              const localData = JSON.parse(localStr);
+              if (localData && localData.submissions) latestSubs = localData.submissions;
+          }
+      } catch(e) {}
+
+      const existingSubIndex = latestSubs.findIndex(s => s.assignmentId === activeAsg.id && String(s.studentId).trim() === String(student.id).trim());
+      const newSubData = { id: `s${Date.now()}`, assignmentId: activeAsg.id, studentId: String(student.id).trim(), fileUrl: finalUrl, submittedAt: new Date().toLocaleString('th-TH'), submittedAtISO: new Date().toISOString(), status: 'submitted', type: submitType };
+
+      if (existingSubIndex >= 0) {
+          const updatedSubs = [...latestSubs];
+          updatedSubs[existingSubIndex] = { ...updatedSubs[existingSubIndex], ...newSubData, id: updatedSubs[existingSubIndex].id }; 
+          setSubmissions(updatedSubs);
+      } else {
+          setSubmissions([newSubData, ...latestSubs]);
+      }
+      showToast('ส่งงานเรียบร้อยแล้ว!');
+      setActiveAsg(null); setFile(null); setLinkUrl('');
+    }
+    setUploading(false);
   };
 
-  const selectClass = `font-bold rounded-xl p-3 outline-none border focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
-
   return (
-    <div className="max-w-6xl mx-auto space-y-6 relative">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <h3 className="text-2xl font-black border-l-4 border-blue-500 pl-4">งานที่ต้องส่ง</h3>
-        <select value={filterSub} onChange={e => setFilterSub(e.target.value)} className={selectClass}><option value="all">ทุกวิชา</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-      </div>
-
-      <div className="space-y-5">
-        {filteredAsgs.map(asg => {
-          const subObj = subjects.find(s => s.id === asg.subjectId);
-          const sub = submissions.find(s => s.assignmentId === asg.id && String(s.studentId).trim() === String(student.id).trim());
-          return (
-            <div key={asg.id} className={`rounded-3xl p-6 shadow-sm flex flex-col lg:flex-row justify-between gap-6 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              
-              {asg.imageUrl && (
-                <div className="w-full lg:w-56 h-48 lg:h-40 shrink-0 rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
-                  <img src={getValidImgUrl(asg.imageUrl)} alt="Assignment" className="w-full h-full object-cover"/>
-                </div>
-              )}
-              
-              <div className="flex-1 flex flex-col">
-                <span className="text-xs font-bold bg-blue-500/10 text-blue-500 px-3 py-1.5 rounded-lg mb-3 self-start">{subObj?.name}</span>
-                <h4 className="text-2xl font-black mb-3 text-blue-600 dark:text-blue-400">{asg.title}</h4>
-                <p className={`text-sm font-bold mb-5 p-4 rounded-xl border flex-1 ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-100 text-slate-600'}`}>{asg.description}</p>
-                
-                <div className="mb-5 flex flex-wrap gap-2">
-                  {asg.linkUrl && (
-                     <a href={asg.linkUrl.startsWith('http') ? asg.linkUrl : `https://${asg.linkUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><ExternalLink size={14} className="mr-2"/> เปิดลิงก์ที่ครูแนบไว้</a>
-                  )}
-                  {asg.imageUrl && (
-                     <a href={asg.imageUrl} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-pink-500 hover:bg-pink-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><DownloadCloud size={14} className="mr-2"/> เปิดดู/โหลดไฟล์แนบ</a>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap gap-3 mt-auto">
-                  <span className={`text-xs font-bold px-4 py-2 rounded-xl flex items-center shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}><Clock size={14} className="mr-2 text-amber-500"/> กำหนดส่ง: {asg.dueDate}</span>
-                  <span className={`text-xs font-bold px-4 py-2 rounded-xl flex items-center shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}><BarChart2 size={14} className="mr-2 text-emerald-500"/> เต็ม: {asg.maxScore}</span>
-                </div>
-              </div>
-
-              <div className={`flex flex-col justify-center min-w-[200px] border-t lg:border-t-0 lg:border-l pt-5 lg:pt-0 lg:pl-6 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                {sub ? (
-                  sub.status === 'graded' ? (
-                     <div className="text-center w-full">
-                        <div className="text-xs font-bold text-emerald-500 mb-2 uppercase tracking-wide">ตรวจแล้ว</div>
-                        <div className="text-4xl font-black text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-5 py-4 rounded-2xl">{sub.score} <span className="text-base font-bold opacity-50">/ {asg.maxScore}</span></div>
-                        {sub.penalty > 0 && <div className="text-xs font-bold text-red-500 mt-2">หักคะแนนส่งช้า -{sub.penalty}</div>}
-                     </div>
-                  ) : (<div className="w-full px-5 py-6 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-2xl text-base font-black flex items-center justify-center"><Clock size={20} className="mr-2" /> ส่งแล้ว รอตรวจ</div>)
-                ) : (
-                  <button onClick={() => { setSelectedAsg(asg); setSubmitMode('file'); }} className="w-full px-8 py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold shadow-md transition-all text-lg flex justify-center items-center"><Upload size={18} className="mr-2"/> ส่งงานนี้</button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {filteredAsgs.length === 0 && <div className={`text-center py-16 rounded-3xl border font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>เย่! ไม่มีงานที่ต้องส่งในขณะนี้</div>}
-      </div>
-
-      {selectedAsg && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className={`rounded-3xl w-full max-w-lg p-8 shadow-2xl relative border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <button onClick={() => setSelectedAsg(null)} className={`absolute top-5 right-5 p-2 rounded-full ${isDark ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'} transition-colors`}><X size={20}/></button>
-            <h3 className="text-2xl font-black mb-2">อัปโหลดส่งงาน</h3>
-            <h4 className="text-blue-500 font-bold mb-6 pb-4 border-b border-slate-700/50 text-lg">{selectedAsg.title}</h4>
+    <div className="max-w-4xl mx-auto space-y-6">
+      <h2 className="text-2xl font-black mb-6 border-l-4 border-blue-600 pl-4">งานที่มอบหมาย</h2>
+      
+      {activeAsg && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in" onClick={()=>!uploading && setActiveAsg(null)}>
+          <div className={`rounded-3xl w-full max-w-md p-6 shadow-2xl relative border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`} onClick={e=>e.stopPropagation()}>
+            <button onClick={()=>!uploading && setActiveAsg(null)} className={`absolute top-4 right-4 p-2 rounded-full ${isDark ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'}`} disabled={uploading}><X size={20}/></button>
+            <h3 className="text-xl font-black mb-1 pr-10 text-blue-600 dark:text-blue-400">{activeAsg.title}</h3>
+            <p className={`text-sm mb-6 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>กำหนดส่ง: {activeAsg.dueDate}</p>
             
-            <div className={`flex rounded-xl p-1.5 mb-6 ${isDark ? 'bg-slate-900' : 'bg-slate-100'}`}>
-              <button onClick={() => setSubmitMode('file')} className={`flex-1 py-2.5 rounded-lg text-sm font-bold flex justify-center items-center transition-all ${submitMode === 'file' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-600 shadow-sm') : 'text-slate-500'}`}><Upload size={16} className="mr-2"/> อัปโหลดไฟล์</button>
-              <button onClick={() => setSubmitMode('link')} className={`flex-1 py-2.5 rounded-lg text-sm font-bold flex justify-center items-center transition-all ${submitMode === 'link' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-600 shadow-sm') : 'text-slate-500'}`}><Link2 size={16} className="mr-2"/> ส่งเป็นลิงก์</button>
-            </div>
+            <form onSubmit={handleSubmit}>
+              <div className={`flex rounded-xl p-1 mb-5 border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
+                <button type="button" onClick={()=>setSubmitType('file')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${submitType === 'file' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}>แนบไฟล์</button>
+                <button type="button" onClick={()=>setSubmitType('link')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${submitType === 'link' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}>แนบลิงก์ผลงาน</button>
+              </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {submitMode === 'file' ? (
-                <div className={`border-2 border-dashed rounded-2xl p-10 text-center relative cursor-pointer hover:border-blue-500 transition-colors ${isDark ? 'border-slate-600 bg-slate-900/50' : 'border-slate-300 bg-slate-50'}`}>
-                  <input type="file" required onChange={(e) => setFile(e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-                  <Upload size={40} className="mx-auto text-blue-500 mb-4" />
-                  <p className="font-bold text-lg">{file ? file.name : 'คลิกเลือกไฟล์ / ลากมาวาง'}</p>
-                  <p className={`text-sm font-bold mt-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>รองรับไฟล์รูปภาพ, PDF, Word ฯลฯ</p>
+              {submitType === 'file' ? (
+                <div className={`border-2 border-dashed rounded-2xl p-8 text-center relative cursor-pointer transition-colors ${isDark ? 'border-slate-600 bg-slate-900/50 hover:border-blue-500 hover:bg-blue-900/20' : 'border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50'}`}>
+                  <input type="file" required onChange={e=>setFile(e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                  <Upload size={32} className={`mx-auto mb-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
+                  <span className={`font-bold text-sm ${file ? 'text-blue-500' : (isDark ? 'text-slate-400' : 'text-slate-500')}`}>{file ? file.name : 'คลิกเพื่อเลือกไฟล์ผลงาน'}</span>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  <label className="block text-sm font-bold">วางลิงก์ผลงาน (เช่น YouTube, Drive, Canva, Padlet)</label>
-                  <input type="url" required value={linkInput} onChange={e => setLinkInput(e.target.value)} placeholder="https://..." className={`w-full rounded-xl px-4 py-4 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} />
-                  <p className={`text-xs font-bold mt-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>* โปรดตรวจสอบให้แน่ใจว่าลิงก์เปิดเป็นสาธารณะ (Public) แล้ว</p>
+                <div>
+                  <label className="block text-sm font-bold mb-2">วางลิงก์ผลงาน (URL)</label>
+                  <input required type="url" value={linkUrl} onChange={e=>setLinkUrl(e.target.value)} className={`w-full rounded-xl px-4 py-3 font-bold outline-none border focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} placeholder="https://..." />
                 </div>
               )}
-
-              <button type="submit" disabled={(submitMode === 'file' && !file) || isUploading} className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold disabled:opacity-50 shadow-md text-lg flex justify-center items-center transition-colors">
-                {isUploading ? <><RefreshCw size={20} className="mr-2 animate-spin"/> กำลังอัปโหลด...</> : 'ยืนยันการส่งงาน'}
+              <button type="submit" disabled={uploading} className="w-full mt-6 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-all flex items-center justify-center disabled:opacity-50">
+                {uploading ? <><RefreshCw size={18} className="mr-2 animate-spin"/> กำลังส่งงาน...</> : 'ยืนยันการส่งงาน'}
               </button>
             </form>
           </div>
         </div>
       )}
+
+      {subjects.map(sub => {
+        const asgs = myAsgs.filter(a => a.subjectId === sub.id);
+        if(asgs.length === 0) return null;
+        return (
+          <div key={sub.id} className={`mb-8 p-6 md:p-8 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <h3 className={`font-black text-xl mb-6 pb-4 border-b flex justify-between items-center ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+               <span className="flex items-center"><Layers size={20} className="mr-3 text-blue-500"/> {sub.name}</span>
+               <span className="text-xs bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400 px-3 py-1.5 rounded-lg">{sub.code}</span>
+            </h3>
+            <div className="space-y-4">
+              {asgs.map(a => {
+                const subM = submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim());
+                const isLate = a.dueDate ? new Date() > new Date(a.dueDate + 'T23:59:59') : false;
+                
+                return (
+                  <div key={a.id} className={`p-5 rounded-2xl border flex flex-col md:flex-row gap-5 relative overflow-hidden transition-all hover:shadow-md ${isDark ? 'bg-slate-900/50 border-slate-700 hover:border-blue-500/50' : 'bg-slate-50 border-slate-200 hover:border-blue-300'}`}>
+                    
+                    {a.imageUrl && (
+                      <div className="w-full md:w-40 h-32 shrink-0 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
+                        <img src={getValidImgUrl(a.imageUrl)} alt="Assignment" className="w-full h-full object-cover"/>
+                      </div>
+                    )}
+                    
+                    <div className="flex-1 flex flex-col">
+                      <div className="flex justify-between items-start mb-2 gap-4">
+                        <h4 className="font-black text-lg text-blue-600 dark:text-blue-400 leading-tight">{a.title}</h4>
+                        <div className={`text-xs font-bold px-3 py-1 rounded whitespace-nowrap ${subM ? (subM.status === 'graded' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700') : (isLate ? 'bg-red-100 text-red-700' : (isDark ? 'bg-slate-800 text-slate-300' : 'bg-amber-100 text-amber-700'))}`}>
+                           {subM ? (subM.status === 'graded' ? '✅ ตรวจแล้ว' : '⏳ รอตรวจ') : (isLate ? '⚠️ เลยกำหนด' : 'ยังไม่ส่ง')}
+                        </div>
+                      </div>
+                      <p className={`text-sm mb-4 line-clamp-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{a.description}</p>
+                      
+                      <div className={`mt-auto flex flex-wrap items-center justify-between gap-3 pt-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                        <div className={`text-xs font-bold flex gap-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                          <span className="flex items-center"><BarChart2 size={14} className="mr-1 text-emerald-500"/> เต็ม {a.maxScore}</span>
+                          <span className="flex items-center"><Clock size={14} className={`mr-1 ${isLate && !subM ? 'text-red-500' : 'text-amber-500'}`}/> กำหนดส่ง: {a.dueDate}</span>
+                        </div>
+                        
+                        <div>
+                          {subM ? (
+                            subM.status === 'graded' ? (
+                              <div className="text-right">
+                                <span className="text-lg font-black text-emerald-500 bg-emerald-500/10 px-4 py-1.5 rounded-lg border border-emerald-500/20">{subM.score} / {a.maxScore}</span>
+                                {subM.penalty > 0 && <div className="text-[10px] text-red-500 font-bold mt-1">ถูกหักส่งช้า -{subM.penalty}</div>}
+                              </div>
+                            ) : (
+                              <button onClick={() => { setActiveAsg(a); setSubmitType('file'); setFile(null); setLinkUrl(''); }} className="px-5 py-2 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50 rounded-lg text-sm font-bold transition-colors">ส่งงานใหม่ (เขียนทับ)</button>
+                            )
+                          ) : (
+                            <button onClick={() => { setActiveAsg(a); setSubmitType('file'); setFile(null); setLinkUrl(''); }} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-md transition-colors flex items-center"><Upload size={16} className="mr-2"/> ส่งงาน</button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      {subjects.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>คุณยังไม่ได้ลงทะเบียนเรียนวิชาใดๆ</div>}
     </div>
   );
 }
@@ -2472,167 +2468,139 @@ function StudentScores({ student, subjects, assignments, submissions, theme }) {
         let totalScore = 0; let maxTotal = 0;
         
         return (
-          <div key={sub.id} className={`rounded-3xl overflow-hidden mb-6 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <div className={`p-5 md:p-6 border-b flex justify-between items-center ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-              <div><span className="text-xs font-bold bg-blue-500/10 text-blue-500 px-3 py-1.5 rounded-lg mr-3">{sub.code}</span><span className="text-xl font-black">{sub.name}</span></div>
-              <div className={`text-sm font-bold px-4 py-1.5 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>เทอม {sub.semester}/{sub.year}</div>
+          <div key={sub.id} className={`p-6 md:p-8 rounded-3xl shadow-sm mb-6 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <h4 className="font-black text-xl mb-6 pb-4 border-b flex items-center text-blue-600 dark:text-blue-400"><Layers size={20} className="mr-3"/> {sub.name} <span className="text-sm font-bold text-slate-400 ml-3">({sub.code})</span></h4>
+            <div className="space-y-3 mb-6">
+              {subAsgs.map(a => {
+                const subM = submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim());
+                const score = (subM && subM.status === 'graded') ? subM.score : 0;
+                totalScore += score; maxTotal += a.maxScore;
+                return (
+                  <div key={a.id} className={`flex justify-between items-center p-4 rounded-2xl border transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 hover:border-slate-600' : 'bg-slate-50 border-slate-100 hover:border-slate-200'}`}>
+                    <span className="font-bold">{a.title}</span>
+                    <div className="flex items-center gap-3">
+                       {subM?.penalty > 0 && <span className="text-xs font-bold text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">หักช้า -{subM.penalty}</span>}
+                       <span className={`font-black ${score > 0 ? 'text-emerald-500' : (isDark ? 'text-slate-500' : 'text-slate-400')}`}>{score} <span className="text-xs font-bold opacity-50">/ {a.maxScore}</span></span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <table className="w-full text-left text-sm font-bold">
-              <tbody className={`divide-y ${isDark ? 'divide-slate-700' : 'divide-slate-100'}`}>
-                {subAsgs.map(asg => {
-                  maxTotal += asg.maxScore;
-                  const subM = submissions.find(s => s.assignmentId === asg.id && String(s.studentId).trim() === String(student.id).trim());
-                  const score = (subM && subM.status === 'graded') ? subM.score : 0;
-                  totalScore += score;
-                  return (
-                    <tr key={asg.id} className={`transition-colors ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}`}>
-                      <td className="p-5">{asg.title}</td>
-                      <td className="p-5 text-right">{subM && subM.status === 'graded' ? <span className="text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-xl">{score} / {asg.maxScore}</span> : <span className="text-slate-500">- / {asg.maxScore}</span>}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <div className="p-6 bg-blue-600 flex justify-between items-center text-white">
-              <span className="font-bold text-lg">คะแนนรวมวิชานี้</span>
-              <span className="text-3xl font-black">{totalScore} <span className="text-xl font-bold opacity-70">/ {maxTotal}</span></span>
+            <div className={`p-5 rounded-2xl flex justify-between items-center shadow-inner border ${isDark ? 'bg-blue-900/20 border-blue-900/50' : 'bg-blue-50 border-blue-100'}`}>
+              <span className="font-black text-blue-600 dark:text-blue-400">คะแนนเก็บรวมวิชานี้</span>
+              <span className="text-2xl font-black text-blue-600 dark:text-blue-400">{totalScore} <span className="text-sm font-bold opacity-60">/ {maxTotal}</span></span>
             </div>
           </div>
         );
       })}
+      {subjects.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>คุณยังไม่ได้ลงทะเบียนเรียนวิชาใดๆ</div>}
     </div>
   );
 }
 
-function StudentAttendance({ student, subjects, attendance, behaviors, theme }) {
+function StudentAttendance({ student, subjects, attendance, theme }) {
   const isDark = theme === 'dark';
-  const studentAtt = attendance.filter(a => String(a.studentId).trim() === String(student.id).trim());
-  const studentBeh = behaviors.filter(b => String(b.studentId).trim() === String(student.id).trim());
-  
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <h3 className="text-2xl font-black border-l-4 border-blue-500 pl-4 mb-6">สถิติการเข้าเรียน & พฤติกรรม</h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {subjects.map(sub => {
-          const subAtt = studentAtt.filter(a => a.subjectId === sub.id);
-          const present = subAtt.filter(a => a.status === 'present').length;
-          const late = subAtt.filter(a => a.status === 'late').length;
-          const absent = subAtt.filter(a => a.status === 'absent').length;
-          const bTotal = studentBeh.filter(b => b.subjectId === sub.id).reduce((sum, b) => sum + b.points, 0);
-          
-          return (
-            <div key={sub.id} className={`p-8 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-               <h4 className="text-xl font-black mb-2">{sub.name}</h4>
-               <p className={`text-xs font-bold mb-6 px-3 py-1 rounded-lg inline-block border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>{sub.code} | เทอม {sub.semester}/{sub.year}</p>
-               <div className="grid grid-cols-3 gap-3 text-center mb-4">
-                  <div className="bg-green-500/10 border border-green-500/20 py-4 rounded-2xl text-green-500"><span className="block text-xs font-bold mb-1">มา</span><span className="text-3xl font-black">{present}</span></div>
-                  <div className="bg-amber-500/10 border border-amber-500/20 py-4 rounded-2xl text-amber-500"><span className="block text-xs font-bold mb-1">สาย</span><span className="text-3xl font-black">{late}</span></div>
-                  <div className="bg-red-500/10 border border-red-500/20 py-4 rounded-2xl text-red-500"><span className="block text-xs font-bold mb-1">ขาด</span><span className="text-3xl font-black">{absent}</span></div>
-               </div>
-               <div className={`p-4 rounded-2xl text-center font-black text-lg border ${bTotal > 0 ? 'bg-green-500/10 text-green-500 border-green-500/20' : bTotal < 0 ? 'bg-red-500/10 text-red-500 border-red-500/20' : (isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200')}`}>
-                 คะแนนพฤติกรรม: {bTotal > 0 ? `+${bTotal}` : bTotal}
-               </div>
+      <h3 className="text-2xl font-black border-l-4 border-blue-500 pl-4 mb-6">สถิติการเข้าเรียน</h3>
+      {subjects.map(sub => {
+        const records = attendance.filter(a => a.subjectId === sub.id && String(a.studentId).trim() === String(student.id).trim()).sort((a,b) => new Date(b.date) - new Date(a.date));
+        if(records.length === 0) return null;
+
+        const counts = { present: 0, late: 0, leave: 0, absent: 0 };
+        records.forEach(r => counts[r.status]++);
+
+        return (
+          <div key={sub.id} className={`p-6 md:p-8 rounded-3xl shadow-sm mb-6 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <h4 className="font-black text-xl mb-6 text-blue-600 dark:text-blue-400">{sub.name} <span className="text-sm font-bold text-slate-400 ml-2">({sub.code})</span></h4>
+            <div className="grid grid-cols-4 gap-3 mb-6">
+              <div className={`p-3 rounded-2xl text-center border ${isDark ? 'bg-green-900/20 border-green-900/50' : 'bg-green-50 border-green-100'}`}><div className="text-xl font-black text-green-600 dark:text-green-400">{counts.present}</div><div className="text-[10px] font-bold text-green-700 dark:text-green-500">มา</div></div>
+              <div className={`p-3 rounded-2xl text-center border ${isDark ? 'bg-amber-900/20 border-amber-900/50' : 'bg-amber-50 border-amber-100'}`}><div className="text-xl font-black text-amber-600 dark:text-amber-400">{counts.late}</div><div className="text-[10px] font-bold text-amber-700 dark:text-amber-500">สาย</div></div>
+              <div className={`p-3 rounded-2xl text-center border ${isDark ? 'bg-blue-900/20 border-blue-900/50' : 'bg-blue-50 border-blue-100'}`}><div className="text-xl font-black text-blue-600 dark:text-blue-400">{counts.leave}</div><div className="text-[10px] font-bold text-blue-700 dark:text-blue-500">ลา</div></div>
+              <div className={`p-3 rounded-2xl text-center border ${isDark ? 'bg-red-900/20 border-red-900/50' : 'bg-red-50 border-red-100'}`}><div className="text-xl font-black text-red-600 dark:text-red-400">{counts.absent}</div><div className="text-[10px] font-bold text-red-700 dark:text-red-500">ขาด</div></div>
             </div>
-          );
-        })}
-      </div>
+            <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+               {records.map(r => {
+                 let sColor = '', sText = '';
+                 if(r.status==='present'){sColor='text-green-600 bg-green-100 dark:text-green-400 dark:bg-green-900/30'; sText='มาเรียน';}
+                 else if(r.status==='late'){sColor='text-amber-600 bg-amber-100 dark:text-amber-400 dark:bg-amber-900/30'; sText='สาย';}
+                 else if(r.status==='leave'){sColor='text-blue-600 bg-blue-100 dark:text-blue-400 dark:bg-blue-900/30'; sText='ลา';}
+                 else if(r.status==='absent'){sColor='text-red-600 bg-red-100 dark:text-red-400 dark:bg-red-900/30'; sText='ขาดเรียน';}
+                 
+                 return (
+                   <div key={r.id} className={`flex justify-between items-center p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                     <span className="font-bold flex items-center"><Calendar size={14} className="mr-2 text-slate-400"/> {r.date}</span>
+                     <span className={`text-xs font-black px-3 py-1 rounded-md ${sColor}`}>{sText}</span>
+                   </div>
+                 );
+               })}
+            </div>
+          </div>
+        );
+      })}
+      {subjects.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>คุณยังไม่ได้ลงทะเบียนเรียนวิชาใดๆ</div>}
+      {subjects.length > 0 && !attendance.find(a => String(a.studentId).trim() === String(student.id).trim()) && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีบันทึกการเข้าเรียน</div>}
     </div>
   );
 }
 
-function StudentProfile({ student, students, setStudents, showToast, dbUrl, theme, saveState }) {
-  const [pwdForm, setPwdForm] = useState({ old: '', new: '', confirm: '' });
-  const [profileImg, setProfileImg] = useState(student.profileImg);
-  
-  const [contactForm, setContactForm] = useState({
+function StudentProfile({ student, setStudents, students, theme, showToast, saveState }) {
+  const isDark = theme === 'dark';
+  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
+
+  const [form, setForm] = useState({
+     password: student.password || '',
      studentPhone: student.studentPhone || '',
      parentPhone: student.parentPhone || '',
      parentRelation: student.parentRelation || ''
   });
 
-  const isDark = theme === 'dark';
+  const handleSaveProfile = (e) => {
+    e.preventDefault();
+    const updatedStudents = students.map(s => String(s.id).trim() === String(student.id).trim() ? { ...s, ...form } : s);
+    saveState({ students: updatedStudents });
+    showToast('อัปเดตข้อมูลโปรไฟล์ส่วนตัวเรียบร้อย');
+  };
 
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
-    if(!file) return;
-
-    showToast('กำลังบันทึกรูปภาพ... กรุณารอสักครู่');
-    const resized = await resizeImage(file);
-    if (resized) {
-      setProfileImg(resized);
-      setStudents(students.map(s => s.id === student.id ? { ...s, profileImg: resized } : s));
-      showToast('อัปเดตรูปประจำตัวสำเร็จ');
+    if (file) {
+      const resized = await resizeImage(file);
+      const updatedStudents = students.map(s => String(s.id).trim() === String(student.id).trim() ? { ...s, profileImg: resized } : s);
+      saveState({ students: updatedStudents });
+      showToast('อัปเดตรูปโปรไฟล์สำเร็จ');
     }
   };
 
-  const handleChangePwd = (e) => {
-    e.preventDefault();
-    const currentPwd = student.password ? String(student.password) : '12345678';
-    
-    if (pwdForm.old !== currentPwd) return showToast('รหัสผ่านเดิมไม่ถูกต้อง');
-    if (pwdForm.new !== pwdForm.confirm) return showToast('รหัสผ่านใหม่ไม่ตรงกัน');
-    
-    setStudents(students.map(s => s.id === student.id ? { ...s, password: pwdForm.new } : s));
-    showToast('เปลี่ยนรหัสผ่านสำเร็จ'); 
-    setPwdForm({ old: '', new: '', confirm: '' });
-  };
-  
-  const handleSaveContact = (e) => {
-     e.preventDefault();
-     const updatedStudents = students.map(s => String(s.id).trim() === String(student.id).trim() ? { ...s, ...contactForm } : s);
-     saveState({ students: updatedStudents });
-     showToast('บันทึกข้อมูลติดต่อของคุณสำเร็จแล้ว');
-  };
-
-  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
-
   return (
-    <div className="max-w-4xl mx-auto space-y-6 flex flex-col md:flex-row gap-6">
-       
-       <div className="md:w-1/3 flex flex-col gap-6">
-           <div className={`rounded-3xl p-8 shadow-sm text-center relative overflow-hidden border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-             <div className="absolute top-0 left-0 w-full h-32 bg-blue-600"></div>
-             <div className={`w-32 h-32 mx-auto rounded-full border-4 shadow-lg relative group overflow-hidden mt-12 flex justify-center items-center z-10 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-white'}`}>
-                {profileImg ? <img src={getValidImgUrl(profileImg)} className="w-full h-full object-cover rounded-full" /> : <User size={48} className="text-slate-400"/>}
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Camera className="text-white" size={32} /><input type="file" accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer"/></div>
+    <div className="max-w-2xl mx-auto space-y-6">
+      <div className={`p-6 md:p-8 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <h2 className="text-xl font-black mb-6 flex items-center border-l-4 border-blue-500 pl-3"><Settings className="mr-2 text-blue-500"/> ตั้งค่าโปรไฟล์ส่วนตัว</h2>
+        <form onSubmit={handleSaveProfile} className="space-y-6">
+          <div className="flex flex-col items-center mb-8 relative">
+            <div className={`w-32 h-32 rounded-full overflow-hidden mb-4 border-4 shadow-md ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
+              {student.profileImg ? <img src={getValidImgUrl(student.profileImg)} className="w-full h-full object-cover" /> : <User size={48} className="w-full h-full p-6 text-slate-300" />}
+            </div>
+            <label className="cursor-pointer bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900 px-5 py-2.5 rounded-full text-sm font-bold flex items-center transition-colors shadow-sm">
+              <Camera size={16} className="mr-2"/> เปลี่ยนรูปโปรไฟล์
+              <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+            </label>
+          </div>
+          
+          <div className={`p-5 rounded-2xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+             <h3 className="font-bold text-blue-500 mb-4 flex items-center"><User size={18} className="mr-2"/> ข้อมูลติดต่อส่วนตัว</h3>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+               <div><label className="block text-sm font-bold mb-2">เบอร์โทรศัพท์นักเรียน</label><input type="text" value={form.studentPhone} onChange={e=>setForm({...form, studentPhone: e.target.value})} className={inputClass} placeholder="เช่น 08x-xxx-xxxx" /></div>
+               <div><label className="block text-sm font-bold mb-2">เบอร์โทรศัพท์ผู้ปกครอง</label><input type="text" value={form.parentPhone} onChange={e=>setForm({...form, parentPhone: e.target.value})} className={inputClass} placeholder="เช่น 08x-xxx-xxxx" /></div>
+               <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">ความสัมพันธ์ผู้ปกครอง (เช่น บิดา, มารดา, ป้า)</label><input type="text" value={form.parentRelation} onChange={e=>setForm({...form, parentRelation: e.target.value})} className={inputClass} placeholder="ระบุความสัมพันธ์" /></div>
              </div>
-             <h3 className="text-2xl font-black mt-4 relative z-10">{student.name}</h3>
-             <p className="text-blue-500 font-bold text-sm relative z-10 mb-2">รหัส {student.id}</p>
-             <div className="mt-4"><label className="cursor-pointer inline-flex items-center px-6 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow-md transition-colors"><Camera size={18} className="mr-2" /> เปลี่ยนรูปประจำตัว<input type="file" accept="image/*" onChange={handleImageChange} className="hidden" /></label></div>
-           </div>
+          </div>
 
-           <div className={`rounded-3xl p-6 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-             <h4 className="font-bold text-slate-500 text-sm mb-4">ข้อมูลนักเรียน (เปลี่ยนไม่ได้)</h4>
-             <div className="space-y-3 font-bold">
-                <div className={`flex justify-between p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}><span className="text-slate-500">ห้อง</span><span>{student.room}</span></div>
-                <div className={`flex justify-between p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}><span className="text-slate-500">เลขที่</span><span>{student.number}</span></div>
-                <div className={`flex justify-between p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}><span className="text-slate-500">ตอน</span><span>{student.section || '-'}</span></div>
-             </div>
-           </div>
-       </div>
-
-       <div className="md:w-2/3 flex flex-col gap-6">
-           <form onSubmit={handleSaveContact} className={`rounded-3xl p-8 shadow-sm space-y-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-             <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><User className="mr-3 text-blue-500"/> ข้อมูลการติดต่อ</h3>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div><label className="block text-sm font-bold mb-2">เบอร์โทรศัพท์ของคุณ (นักเรียน)</label><input type="text" value={contactForm.studentPhone} onChange={e=>setContactForm({...contactForm, studentPhone: e.target.value})} className={inputClass} placeholder="08x-xxx-xxxx" /></div>
-                <div><label className="block text-sm font-bold mb-2">เบอร์โทรศัพท์ผู้ปกครอง</label><input type="text" value={contactForm.parentPhone} onChange={e=>setContactForm({...contactForm, parentPhone: e.target.value})} className={inputClass} placeholder="08x-xxx-xxxx" /></div>
-                <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">ความสัมพันธ์ผู้ปกครอง (เช่น บิดา, มารดา, ป้า, ปู่, พี่)</label><input type="text" value={contactForm.parentRelation} onChange={e=>setContactForm({...contactForm, parentRelation: e.target.value})} className={inputClass} /></div>
-             </div>
-             <div className="pt-2 flex justify-end"><button type="submit" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-all">บันทึกข้อมูลติดต่อ</button></div>
-           </form>
-
-           <form onSubmit={handleChangePwd} className={`rounded-3xl p-8 shadow-sm space-y-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-             <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><Settings className="mr-3 text-blue-500"/> เปลี่ยนรหัสผ่าน</h3>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-               <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">รหัสผ่านเดิม</label><input required type="password" value={pwdForm.old} onChange={e=>setPwdForm({...pwdForm, old: e.target.value})} className={inputClass} /></div>
-               <div><label className="block text-sm font-bold mb-2">รหัสผ่านใหม่</label><input required type="password" value={pwdForm.new} onChange={e=>setPwdForm({...pwdForm, new: e.target.value})} className={inputClass} /></div>
-               <div><label className="block text-sm font-bold mb-2">ยืนยันรหัสผ่านใหม่</label><input required type="password" value={pwdForm.confirm} onChange={e=>setPwdForm({...pwdForm, confirm: e.target.value})} className={inputClass} /></div>
-             </div>
-             <div className="pt-2 flex justify-end"><button type="submit" className="px-8 py-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold shadow-md transition-all">อัปเดตรหัสผ่าน</button></div>
-           </form>
-       </div>
-
+          <div><label className="block text-sm font-bold mb-2">รหัสผ่านใหม่ (สำหรับเข้าสู่ระบบ)</label><input required type="password" value={form.password} onChange={e=>setForm({...form, password: e.target.value})} className={inputClass} /></div>
+          
+          <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-colors flex items-center justify-center text-lg"><Save size={20} className="mr-2"/> บันทึกข้อมูลส่วนตัว</button>
+        </form>
+      </div>
     </div>
   );
 }
