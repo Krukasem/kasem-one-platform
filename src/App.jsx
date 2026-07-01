@@ -43,6 +43,12 @@ const resizeImage = (file) => {
   });
 };
 
+const getSafeNum = (val, fallback = 0) => {
+  if (val === null || val === undefined || val === '') return fallback;
+  const num = Number(val);
+  return isNaN(num) ? fallback : num;
+};
+
 // --- Custom Confirm Modal Component ---
 function ConfirmModal({ isOpen, title, message, onConfirm, onCancel, theme }) {
   if (!isOpen) return null;
@@ -499,7 +505,7 @@ function TeacherDashboard({ students, subjects, assignments, submissions, attend
   const today = new Date().toISOString().split('T')[0];
   const todayAtt = attendance.filter(a => a.date === today);
   const presentToday = todayAtt.filter(a => a.status === 'present').length;
-  const totalBehaviors = behaviors.reduce((sum, b) => sum + b.points, 0);
+  const totalBehaviors = behaviors.reduce((sum, b) => sum + getSafeNum(b.points, 0), 0);
 
   // คำนวณนักเรียน Top 3 ของแต่ละวิชา
   const topStudentsBySubject = subjects.map(sub => {
@@ -512,12 +518,12 @@ function TeacherDashboard({ students, subjects, assignments, submissions, attend
          targetAsgs.forEach(asg => {
              const subM = submissions.find(s => s.assignmentId === asg.id && String(s.studentId).trim() === String(stu.id).trim());
              if (subM && subM.status === 'graded') {
-                 asgTotal += subM.score;
+                 asgTotal += getSafeNum(subM.score, 0);
              }
          });
          const examRec = exams.find(e => e.subjectId === sub.id && String(e.studentId).trim() === String(stu.id).trim()) || {};
-         const mid = examRec.midterm || 0;
-         const fin = examRec.final || 0;
+         const mid = getSafeNum(examRec.midterm, 0);
+         const fin = getSafeNum(examRec.final, 0);
          const grandTotal = asgTotal + mid + fin;
          return { ...stu, grandTotal };
      });
@@ -1074,7 +1080,7 @@ function ViewStudentModal({ student, onClose, students, setStudents, assignments
      parentRelation: student.parentRelation || ''
   });
 
-  const totalBehaviors = behaviors.filter(b => String(b.studentId).trim() === String(student.id).trim()).reduce((sum, b) => sum + b.points, 0);
+  const totalBehaviors = behaviors.filter(b => String(b.studentId).trim() === String(student.id).trim()).reduce((sum, b) => sum + getSafeNum(b.points, 0), 0);
   
   // คำนวณงานค้างส่งเฉพาะวิชาที่นักเรียนลงทะเบียนเรียน
   const enrolledSubjectIds = (enrollments || []).filter(e => String(e.studentId).trim() === String(student.id).trim()).map(e => e.subjectId);
@@ -1976,8 +1982,8 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
   const isDark = theme === 'dark';
 
   const subObj = subjects.find(s => s.id === filterSub);
-  const maxMid = subObj?.midtermMax ?? 20;
-  const maxFin = subObj?.finalMax ?? 30;
+  const maxMid = getSafeNum(subObj?.midtermMax, 20);
+  const maxFin = getSafeNum(subObj?.finalMax, 30);
 
   const targetAsgs = assignments.filter(a => a.subjectId === filterSub);
   const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
@@ -1993,18 +1999,20 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
     let asgTotal = 0;
     const scores = targetAsgs.reduce((acc, asg) => {
       const sub = submissions.find(s => String(s.studentId).trim() === String(stu.id).trim() && s.assignmentId === asg.id);
-      const score = (sub && sub.status === 'graded') ? sub.score : 0;
+      const score = (sub && sub.status === 'graded') ? getSafeNum(sub.score, 0) : 0;
       asgTotal += score; acc[asg.id] = score; return acc;
     }, {});
     
-    const examRec = exams.find(e => String(e.studentId).trim() === String(stu.id).trim() && e.subjectId === filterSub) || { midterm: 0, final: 0 };
-    const behaviorTotal = behaviors.filter(b => b.subjectId === filterSub && String(b.studentId).trim() === String(stu.id).trim()).reduce((sum, b) => sum + b.points, 0);
-    const grandTotal = asgTotal + (examRec.midterm || 0) + (examRec.final || 0);
+    const examRec = exams.find(e => String(e.studentId).trim() === String(stu.id).trim() && e.subjectId === filterSub) || {};
+    const behaviorTotal = behaviors.filter(b => b.subjectId === filterSub && String(b.studentId).trim() === String(stu.id).trim()).reduce((sum, b) => sum + getSafeNum(b.points, 0), 0);
+    const mid = getSafeNum(examRec.midterm, 0);
+    const fin = getSafeNum(examRec.final, 0);
+    const grandTotal = asgTotal + mid + fin;
 
-    return { ...stu, scores, asgTotal, mid: examRec.midterm || 0, fin: examRec.final || 0, behaviorTotal, grandTotal };
+    return { ...stu, scores, asgTotal, mid, fin, behaviorTotal, grandTotal };
   });
 
-  const maxAsgTotal = targetAsgs.reduce((sum, asg) => sum + asg.maxScore, 0);
+  const maxAsgTotal = targetAsgs.reduce((sum, asg) => sum + getSafeNum(asg.maxScore, 0), 0);
   const maxGrandTotal = maxAsgTotal + maxMid + maxFin;
 
   const handleExport = () => {
@@ -2303,7 +2311,7 @@ function StudentAssignments({ student, subjects, assignments, submissions, setSu
     e.preventDefault();
     if (submitType === 'file' && !file) return showToast('กรุณาเลือกไฟล์');
     if (submitType === 'link' && !linkUrl) return showToast('กรุณาระบุลิงก์ผลงาน');
-    if (submitType === 'file' && !dbUrl) return showToast('ระบบยังไม่พร้อมรับไฟล์ (แอดมินยังไม่ตั้งค่า DB)');
+    if (submitType === 'file' && !dbUrl) return showToast('ระบบไม่ได้เชื่อมต่อฐานข้อมูล ครูผู้สอนยังไม่ได้เปิดระบบอัปโหลด');
 
     setUploading(true);
     let finalUrl = linkUrl;
@@ -2314,12 +2322,21 @@ function StudentAssignments({ student, subjects, assignments, submissions, setSu
       await new Promise(resolve => {
         reader.onload = async () => {
           const base64 = reader.result.split(',')[1];
-          const payload = { action: 'uploadWork', filename: `${student.id}_${file.name}`, mimeType: file.type, fileData: base64 };
+          // เปลี่ยน action ให้ตรงกับ Google Apps Script เป็น uploadSubmission
+          const payload = { action: 'uploadSubmission', filename: `${student.id}_${file.name}`, mimeType: file.type, fileData: base64 };
           try {
             const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
             const data = await res.json();
-            if (data.url) finalUrl = data.url;
+            if (data.url) {
+               finalUrl = data.url;
+            } else if (data.status === 'error') {
+               showToast(`ข้อผิดพลาด: ${data.message}`);
+            }
           } catch(err) { showToast('อัปโหลดไฟล์ล้มเหลว ตรวจสอบอินเทอร์เน็ต'); }
+          resolve();
+        };
+        reader.onerror = () => {
+          showToast('เกิดข้อผิดพลาดในการอ่านไฟล์');
           resolve();
         };
       });
@@ -2473,8 +2490,8 @@ function StudentScores({ student, subjects, assignments, submissions, theme }) {
             <div className="space-y-3 mb-6">
               {subAsgs.map(a => {
                 const subM = submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim());
-                const score = (subM && subM.status === 'graded') ? subM.score : 0;
-                totalScore += score; maxTotal += a.maxScore;
+                const score = (subM && subM.status === 'graded') ? getSafeNum(subM.score, 0) : 0;
+                totalScore += score; maxTotal += getSafeNum(a.maxScore, 0);
                 return (
                   <div key={a.id} className={`flex justify-between items-center p-4 rounded-2xl border transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 hover:border-slate-600' : 'bg-slate-50 border-slate-100 hover:border-slate-200'}`}>
                     <span className="font-bold">{a.title}</span>
