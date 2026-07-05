@@ -4,10 +4,9 @@ import {
   LogOut, Plus, Search, FileText, User, Home, DownloadCloud,
   Trash2, Filter, Layers, ClipboardPaste, AlertCircle, ArrowUpDown, 
   Calendar, Clock, X, Settings, Camera, Cloud, CloudOff, RefreshCw,
-  Moon, Sun, FolderOpen, Award, Save, ClipboardCheck, Bell, ExternalLink, Image as ImageIcon, Link2, Edit, Menu
+  Moon, Sun, FolderOpen, Award, Save, ClipboardCheck, Bell, ExternalLink, Edit, Menu, Link as LinkIcon, UserPlus, Image as ImageIcon
 } from 'lucide-react';
 
-// --- Safe Storage Wrapper ---
 const safeGetItem = (key) => { try { return localStorage.getItem(key); } catch (e) { return null; } };
 const safeSetItem = (key, value) => { try { localStorage.setItem(key, value); } catch (e) { console.warn("Local storage blocked."); } };
 
@@ -21,6 +20,7 @@ const getValidImgUrl = (url) => {
   return url;
 };
 
+// ฟังก์ชันครอบตัดรูปภาพโปรไฟล์ (Crop 1:1 ขนาด 150x150)
 const resizeImage = (file) => {
   return new Promise((resolve) => {
     if (!file) return resolve(null);
@@ -43,36 +43,53 @@ const resizeImage = (file) => {
   });
 };
 
+// ฟังก์ชันย่อขนาดภาพ (บีบอัด) เพื่ออัปโหลดไวขึ้น ป้องกันปัญหาไฟล์เกินขนาด (คงอัตราส่วนเดิม)
+const compressImage = (file, maxWidth = 800) => {
+  return new Promise((resolve) => {
+    if (!file) return resolve(null);
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (e) => {
+      const img = new Image();
+      img.src = e.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        // บีบอัดภาพเป็น JPEG ที่คุณภาพ 70% เพื่อให้ไฟล์มีขนาดเล็กลง
+        resolve(canvas.toDataURL('image/jpeg', 0.7)); 
+      };
+    };
+  });
+};
+
 const getSafeNum = (val, fallback = 0) => {
   if (val === null || val === undefined || val === '') return fallback;
   const num = Number(val);
   return isNaN(num) ? fallback : num;
 };
 
-// --- Custom Confirm Modal Component ---
-function ConfirmModal({ isOpen, title, message, onConfirm, onCancel, theme }) {
-  if (!isOpen) return null;
-  const isDark = theme === 'dark';
-  return (
-    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in">
-      <div className={`rounded-3xl w-full max-w-sm p-6 shadow-2xl relative border text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-        <AlertCircle className="mx-auto text-red-500 mb-4" size={48} />
-        <h3 className="text-xl font-black mb-2">{title}</h3>
-        <p className={`text-sm font-bold mb-6 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{message}</p>
-        <div className="flex gap-3">
-          <button onClick={onCancel} className={`flex-1 py-3 rounded-xl font-bold transition-all ${isDark ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>ยกเลิก</button>
-          <button onClick={onConfirm} className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold shadow-md">ยืนยัน</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+const isAsgForStudent = (asg, student) => {
+  if (!asg.targetRooms || asg.targetRooms.length === 0) return true;
+  return asg.targetRooms.includes(String(student.room));
+};
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [theme, setTheme] = useState(() => safeGetItem('kasem_theme') || 'light');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   
   const [students, setStudents] = useState([]);
   const [subjects, setSubjects] = useState([]);
@@ -86,7 +103,7 @@ export default function App() {
   const [announcements, setAnnouncements] = useState([]);
   const [teacherProfile, setTeacherProfile] = useState(defaultTeacherProfile);
   
-  const [dbUrl, setDbUrl] = useState(() => safeGetItem('kasem_db_url') || 'https://script.google.com/macros/s/AKfycbzv7jGXKr_vjad9MjVE5FqG6Jvv5FGfYzmokFbDuGCnRHCS6oFglG0bT1xNXNU_6rao/exec');
+  const [dbUrl, setDbUrl] = useState(() => safeGetItem('kasem_db_url') || 'https://script.google.com/macros/s/AKfycbyJfQFLV-BLkfmPizvpcxazSHa1mdJvRQ0DB9Q3xJxIKCYYg8u6T42dzhD-akAdxyAuYA/exec');
   const [syncStatus, setSyncStatus] = useState('idle'); 
   const [isLoadingDB, setIsLoadingDB] = useState(true);
   const [toastMessage, setToastMessage] = useState(null);
@@ -99,75 +116,74 @@ export default function App() {
     else document.documentElement.classList.remove('dark');
   }, [theme]);
 
-  useEffect(() => {
-    const loadData = async () => {
-      setIsLoadingDB(true);
-      if (dbUrl) {
-        try {
-          const res = await fetch(dbUrl);
-          const rawData = await res.text();
-          if (rawData.trim().startsWith('<')) throw new Error('ไม่ได้ตั้งค่าสิทธิ์ให้ "ทุกคน (Anyone)" เข้าถึงได้');
-          if (rawData && rawData.trim() !== '{}') {
-            const data = JSON.parse(rawData);
-            if (data.error) throw new Error(data.error);
+  const loadDataFromDB = async () => {
+    setIsLoadingDB(true);
+    if (dbUrl) {
+      try {
+        const res = await fetch(dbUrl);
+        const rawData = await res.text();
+        if (rawData.trim().startsWith('<')) throw new Error('ไม่ได้ตั้งค่าสิทธิ์ให้ "ทุกคน (Anyone)" เข้าถึงได้');
+        if (rawData && rawData.trim() !== '{}') {
+          const data = JSON.parse(rawData);
+          if (data.error) throw new Error(data.error);
 
-            // Fix Date formats that Google Sheets might have modified (converted to UTC ISO strings)
-            const fixDate = (dateStr) => {
-               if (!dateStr) return dateStr;
-               const str = String(dateStr);
-               if (str.includes('T')) {
-                  const d = new Date(str);
-                  if (!isNaN(d.getTime())) {
-                     const year = d.getFullYear();
-                     const month = String(d.getMonth() + 1).padStart(2, '0');
-                     const day = String(d.getDate()).padStart(2, '0');
-                     return `${year}-${month}-${day}`;
-                  }
-               }
-               return str.split('T')[0];
-            };
-            
-            if (data.attendance) data.attendance = data.attendance.map(a => ({...a, date: fixDate(a.date)}));
-            if (data.behaviors) data.behaviors = data.behaviors.map(b => ({...b, date: fixDate(b.date)}));
+          const fixDate = (dateStr) => {
+             if (!dateStr) return dateStr;
+             const str = String(dateStr);
+             if (str.includes('T')) {
+                const d = new Date(str);
+                if (!isNaN(d.getTime())) {
+                   const year = d.getFullYear();
+                   const month = String(d.getMonth() + 1).padStart(2, '0');
+                   const day = String(d.getDate()).padStart(2, '0');
+                   return `${year}-${month}-${day}`;
+                }
+             }
+             return str.split('T')[0];
+          };
+          
+          if (data.attendance) data.attendance = data.attendance.map(a => ({...a, date: fixDate(a.date)}));
+          if (data.behaviors) data.behaviors = data.behaviors.map(b => ({...b, date: fixDate(b.date)}));
 
-            setStudents(data.students || []); setSubjects(data.subjects || []);
-            setEnrollments(data.enrollments || []); setAssignments(data.assignments || []);
-            setSubmissions(data.submissions || []); setAttendance(data.attendance || []);
-            setExams(data.exams || []); setBehaviors(data.behaviors || []); setMaterials(data.materials || []);
-            setAnnouncements(data.announcements || []);
-            setTeacherProfile(data.teacherProfile || defaultTeacherProfile);
-          } else {
-             setTeacherProfile(defaultTeacherProfile);
-          }
-        } catch (error) {
-          showToast(`เชื่อมต่อ DB ล้มเหลว: ${error.message}`);
-          loadLocalFallback();
-        }
-      } else {
-        loadLocalFallback();
-      }
-      setIsLoadingDB(false);
-    };
-
-    const loadLocalFallback = () => {
-      const localData = safeGetItem('kasem_local_data');
-      if (localData) {
-        try {
-          const data = JSON.parse(localData);
           setStudents(data.students || []); setSubjects(data.subjects || []);
           setEnrollments(data.enrollments || []); setAssignments(data.assignments || []);
           setSubmissions(data.submissions || []); setAttendance(data.attendance || []);
           setExams(data.exams || []); setBehaviors(data.behaviors || []); setMaterials(data.materials || []);
           setAnnouncements(data.announcements || []);
           setTeacherProfile(data.teacherProfile || defaultTeacherProfile);
-        } catch (e) { setTeacherProfile(defaultTeacherProfile); }
-      } else { setTeacherProfile(defaultTeacherProfile); }
-    };
+        } else {
+           setTeacherProfile(defaultTeacherProfile);
+        }
+      } catch (error) {
+        showToast(`เชื่อมต่อ DB ล้มเหลว: ${error.message}`);
+        loadLocalFallback();
+      }
+    } else {
+      loadLocalFallback();
+    }
+    setIsLoadingDB(false);
+  };
 
-    loadData();
+  useEffect(() => {
+    loadDataFromDB();
   }, [dbUrl]);
 
-  const saveState = async (updates) => {
+  const loadLocalFallback = () => {
+    const localData = safeGetItem('kasem_local_data');
+    if (localData) {
+      try {
+        const data = JSON.parse(localData);
+        setStudents(data.students || []); setSubjects(data.subjects || []);
+        setEnrollments(data.enrollments || []); setAssignments(data.assignments || []);
+        setSubmissions(data.submissions || []); setAttendance(data.attendance || []);
+        setExams(data.exams || []); setBehaviors(data.behaviors || []); setMaterials(data.materials || []);
+        setAnnouncements(data.announcements || []);
+        setTeacherProfile(data.teacherProfile || defaultTeacherProfile);
+      } catch (e) { setTeacherProfile(defaultTeacherProfile); }
+    } else { setTeacherProfile(defaultTeacherProfile); }
+  };
+
+  const saveState = async (updates, skipCloudSync = false) => {
     if (updates.students) setStudents(updates.students); 
     if (updates.subjects) setSubjects(updates.subjects);
     if (updates.enrollments) setEnrollments(updates.enrollments); 
@@ -180,43 +196,71 @@ export default function App() {
     if (updates.announcements) setAnnouncements(updates.announcements);
     if (updates.teacherProfile) setTeacherProfile(updates.teacherProfile);
 
-    // Ensure GAS doesn't drop columns by strictly formatting the payload
-    const finalSubjects = (updates.subjects || subjects).map(s => ({
-        id: s.id || '', code: s.code || '', name: s.name || '', semester: s.semester || '1', year: s.year || '',
-        midtermMax: s.midtermMax !== undefined && s.midtermMax !== null ? s.midtermMax : 20,
-        finalMax: s.finalMax !== undefined && s.finalMax !== null ? s.finalMax : 30
-    }));
+    // จัดฟอร์แมตข้อมูลนักเรียน เพื่อป้องกันคอลัมน์หายใน Google Sheets
+    let currentStudents = updates.students || students;
+    if (currentStudents && currentStudents.length > 0) {
+      const allKeys = ['id', 'password', 'name', 'number', 'section', 'room', 'profileImg', 'studentPhone', 'parentPhone', 'lastLogin'];
+      currentStudents = currentStudents.map(s => {
+        const norm = {};
+        allKeys.forEach(k => norm[k] = s[k] || ''); 
+        return { ...norm, ...s };
+      });
+    }
 
     const payload = {
-      students: updates.students || students, subjects: finalSubjects, enrollments: updates.enrollments || enrollments, 
-      assignments: updates.assignments || assignments, submissions: updates.submissions || submissions, 
-      attendance: updates.attendance || attendance, exams: updates.exams || exams, behaviors: updates.behaviors || behaviors,
-      materials: updates.materials || materials, announcements: updates.announcements || announcements, teacherProfile: updates.teacherProfile || teacherProfile
+      students: currentStudents, 
+      subjects: updates.subjects || subjects, 
+      enrollments: updates.enrollments || enrollments, 
+      assignments: updates.assignments || assignments, 
+      submissions: updates.submissions || submissions, 
+      attendance: updates.attendance || attendance, 
+      exams: updates.exams || exams, 
+      behaviors: updates.behaviors || behaviors,
+      materials: updates.materials || materials, 
+      announcements: updates.announcements || announcements, 
+      teacherProfile: updates.teacherProfile || teacherProfile
     };
 
     safeSetItem('kasem_local_data', JSON.stringify(payload));
 
-    if (dbUrl) {
+    if (dbUrl && !skipCloudSync) {
       setSyncStatus('syncing');
       try {
-        await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'sync', data: JSON.stringify(payload) }) });
+        // Exclude submissions from bulk sync to prevent overwriting during concurrent gradings/submissions
+        const syncPayload = { ...payload };
+        delete syncPayload.submissions;
+
+        await fetch(dbUrl, { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
+          body: JSON.stringify({ action: 'sync', data: JSON.stringify(syncPayload) }) 
+        });
         setSyncStatus('success'); setTimeout(() => setSyncStatus('idle'), 2000);
       } catch (e) { setSyncStatus('error'); }
     }
   };
-
-  const getUniqueRooms = () => [...new Set(students.map(s => String(s.room || '').trim()))].filter(Boolean).sort();
-  const getUniqueSections = (roomId) => [...new Set(students.filter(s => String(s.room || '').trim() === String(roomId).trim()).map(s => String(s.section || '').trim()))].filter(Boolean).sort();
-
 
   const handleLoginSuccess = (userObj) => {
     if (userObj.role === 'student') {
       const now = new Date().toLocaleString('th-TH');
       const updatedStudent = { ...userObj.data, lastLogin: now };
       const newStudents = students.map(s => String(s.id).trim() === String(updatedStudent.id).trim() ? updatedStudent : s);
-      setStudents(newStudents);
-      // ยกเลิกการเรียก saveState ตรงนี้ เพื่อไม่ให้เกิดปัญหานักเรียนล็อกอินแล้วเซฟข้อมูลเก่าทับฐานข้อมูลเพื่อน
+      saveState({ students: newStudents }, true);
       setCurrentUser({ role: 'student', data: updatedStudent });
+      
+      if (dbUrl) {
+         fetch(dbUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+               action: 'updateRecord',
+               sheetName: 'students',
+               keyField: 'id',
+               keyValue: String(updatedStudent.id).trim(),
+               updateData: { lastLogin: now }
+            })
+         }).catch(e=>console.log('last login update failed'));
+      }
     } else {
       setCurrentUser(userObj);
     }
@@ -227,7 +271,7 @@ export default function App() {
 
   let liveUser = currentUser;
   if (currentUser.role === 'student') {
-     const st = students.find(s => s.id === currentUser.data.id);
+     const st = students.find(s => String(s.id) === String(currentUser.data.id));
      if (st) liveUser = { ...currentUser, data: st };
   } else { liveUser = { ...currentUser, data: teacherProfile }; }
 
@@ -235,23 +279,24 @@ export default function App() {
   if (liveUser.role === 'student') {
     const mySubjectIds = enrollments.filter(e => String(e.studentId).trim() === String(liveUser.data.id).trim()).map(e => e.subjectId);
     mySubjects = subjects.filter(s => mySubjectIds.includes(s.id));
-    myAssignments = assignments.filter(a => mySubjectIds.includes(a.subjectId));
+    myAssignments = assignments.filter(a => mySubjectIds.includes(a.subjectId) && isAsgForStudent(a, liveUser.data));
   }
 
   const commonProps = {
-    students, setStudents: (data) => saveState({students: data}),
-    subjects: liveUser.role === 'teacher' ? subjects : mySubjects, setSubjects: (data) => saveState({subjects: data}),
-    enrollments, setEnrollments: (data) => saveState({enrollments: data}),
-    assignments: liveUser.role === 'teacher' ? assignments : myAssignments, setAssignments: (data) => saveState({assignments: data}),
-    submissions, setSubmissions: (data) => saveState({submissions: data}),
-    attendance, setAttendance: (data) => saveState({attendance: data}),
-    exams, setExams: (data) => saveState({exams: data}),
-    behaviors, setBehaviors: (data) => saveState({behaviors: data}),
-    materials, setMaterials: (data) => saveState({materials: data}),
-    announcements, setAnnouncements: (data) => saveState({announcements: data}),
-    teacherProfile, setTeacherProfile: (data) => saveState({teacherProfile: data}),
+    students, setStudents,
+    subjects: liveUser.role === 'teacher' ? subjects : mySubjects, setSubjects,
+    enrollments, setEnrollments,
+    assignments: liveUser.role === 'teacher' ? assignments : myAssignments, setAssignments,
+    submissions, setSubmissions,
+    attendance, setAttendance,
+    exams, setExams,
+    behaviors, setBehaviors,
+    materials, setMaterials,
+    announcements, setAnnouncements,
+    teacherProfile, setTeacherProfile,
     dbUrl, setDbUrl: (url) => { setDbUrl(url); safeSetItem('kasem_db_url', url); },
-    getUniqueRooms, getUniqueSections, showToast, setActiveTab, theme, setTheme, saveState 
+    showToast, setActiveTab, theme, setTheme, saveState, loadDataFromDB,
+    confirmAction: (msg, action) => setConfirmDialog({ message: msg, onConfirm: action })
   };
 
   return (
@@ -262,21 +307,34 @@ export default function App() {
         </div>
       )}
       
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4 animate-in fade-in">
+          <div className={`p-6 md:p-8 rounded-3xl max-w-sm w-full shadow-2xl border ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}>
+            <div className="flex items-center mb-4 text-red-500">
+               <AlertCircle size={28} className="mr-3" />
+               <h3 className="text-xl font-black">ยืนยันการทำรายการ</h3>
+            </div>
+            <p className={`mb-8 font-bold text-sm whitespace-pre-wrap ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>{confirmDialog.message}</p>
+            <div className="flex justify-end gap-3">
+               <button onClick={() => setConfirmDialog(null)} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${theme === 'dark' ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>ยกเลิก</button>
+               <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="px-5 py-2.5 rounded-xl font-bold bg-red-600 hover:bg-red-700 text-white shadow-md">ยืนยันทำรายการ</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Sidebar 
         currentUser={liveUser} 
         activeTab={activeTab} 
         setActiveTab={(tab) => { setActiveTab(tab); setIsMobileMenuOpen(false); }} 
-        onLogout={() => {
-           setCurrentUser(null);
-           safeSetItem('kasem_creds', null);
-        }} 
+        onLogout={() => { setCurrentUser(null); safeSetItem('kasem_creds', null); }} 
         theme={theme} 
         isOpen={isMobileMenuOpen} 
         setIsOpen={setIsMobileMenuOpen} 
       />
 
       <div className="flex-1 flex flex-col h-screen overflow-hidden w-full relative">
-        <TopNav currentUser={liveUser} syncStatus={syncStatus} dbUrl={dbUrl} theme={theme} setIsMobileMenuOpen={setIsMobileMenuOpen} />
+        <TopNav currentUser={liveUser} syncStatus={syncStatus} dbUrl={dbUrl} theme={theme} setIsMobileMenuOpen={setIsMobileMenuOpen} loadDataFromDB={loadDataFromDB} />
         <main className={`flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 custom-scrollbar ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-50'}`}>
           {liveUser.role === 'teacher' ? <TeacherView activeTab={activeTab} {...commonProps} /> : <StudentView activeTab={activeTab} student={liveUser.data} {...commonProps} />}
         </main>
@@ -314,7 +372,6 @@ function LoginView({ onLogin, students, teacherProfile, theme, showToast }) {
 
     if (role === 'teacher') {
       const adminPwd = teacherProfile.password ? String(teacherProfile.password) : 'admin';
-      
       if (password === adminPwd) {
         if (rememberMe) safeSetItem('kasem_creds', JSON.stringify({ role: 'teacher', password }));
         else safeSetItem('kasem_creds', null);
@@ -325,7 +382,6 @@ function LoginView({ onLogin, students, teacherProfile, theme, showToast }) {
     } else {
       const student = students.find(s => String(s.id).trim() === studentId.trim());
       const stuPwd = student?.password ? String(student.password) : '12345678';
-      
       if (student && password === stuPwd) {
         if (rememberMe) safeSetItem('kasem_creds', JSON.stringify({ role: 'student', id: studentId, password }));
         else safeSetItem('kasem_creds', null);
@@ -375,10 +431,6 @@ function LoginView({ onLogin, students, teacherProfile, theme, showToast }) {
 
           <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg transition-all">เข้าสู่ระบบ</button>
         </form>
-
-        <div className="mt-8 pt-4 border-t border-slate-200 dark:border-slate-700 text-center text-[11px] font-bold text-slate-400 dark:text-slate-500 tracking-wide">
-           พัฒนาโดย นายเกษม พิมพ์เงิน ครูโรงเรียนสระบุรีวิทยาคม
-        </div>
       </div>
     </div>
   );
@@ -441,16 +493,13 @@ function Sidebar({ currentUser, activeTab, setActiveTab, onLogout, theme, isOpen
           <button onClick={onLogout} className={`flex items-center w-full px-4 py-2 rounded-xl font-bold transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-500 hover:text-red-600 hover:bg-red-50'}`}>
             <LogOut size={18} className="mr-3" /> ออกจากระบบ
           </button>
-          <div className={`text-center text-[9px] font-bold leading-relaxed ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-            พัฒนาโดย นายเกษม พิมพ์เงิน<br/>ครูโรงเรียนสระบุรีวิทยาคม
-          </div>
         </div>
       </div>
     </>
   );
 }
 
-function TopNav({ currentUser, syncStatus, dbUrl, theme, setIsMobileMenuOpen }) {
+function TopNav({ currentUser, syncStatus, dbUrl, theme, setIsMobileMenuOpen, loadDataFromDB }) {
   const isDark = theme === 'dark';
   return (
     <header className={`h-16 md:h-20 backdrop-blur-md flex items-center justify-between px-4 md:px-8 shrink-0 z-10 border-b ${isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
@@ -462,19 +511,23 @@ function TopNav({ currentUser, syncStatus, dbUrl, theme, setIsMobileMenuOpen }) 
         {currentUser.role === 'teacher' && (
            <div className={`hidden lg:flex items-center text-[10px] font-bold px-3 py-1.5 rounded-full border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
              {!dbUrl && <><CloudOff size={12} className="mr-1.5 text-slate-400"/><span className="text-slate-500">ออฟไลน์</span></>}
-             {dbUrl && syncStatus === 'idle' && <><Cloud size={12} className="mr-1.5 text-emerald-500"/><span className="text-emerald-500">เชื่อมต่อแล้ว (Synced)</span></>}
+             {dbUrl && syncStatus === 'idle' && <><Cloud size={12} className="mr-1.5 text-emerald-500"/><span className="text-emerald-500">เชื่อมต่อแล้ว</span></>}
              {dbUrl && syncStatus === 'syncing' && <><RefreshCw size={12} className="mr-1.5 text-blue-500 animate-spin"/><span className="text-blue-500">กำลังซิงค์...</span></>}
            </div>
         )}
       </div>
-      <div className={`flex items-center rounded-full pr-4 pl-1.5 py-1.5 border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center overflow-hidden shrink-0 mr-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-100 border-slate-200'}`}>
-          {currentUser.data.profileImg ? <img src={getValidImgUrl(currentUser.data.profileImg)} className="w-full h-full object-cover rounded-full"/> : <User size={16} className="text-slate-400" />}
-        </div>
-        <div className="flex flex-col">
-          <span className={`text-sm font-black leading-tight hidden sm:block ${isDark ? 'text-white' : 'text-slate-800'}`}>{currentUser.data.name}</span>
-          <span className={`text-sm font-black leading-tight sm:hidden ${isDark ? 'text-white' : 'text-slate-800'}`}>โปรไฟล์</span>
-          <span className="text-[10px] font-bold text-blue-500">{currentUser.role === 'teacher' ? 'แอดมิน' : `นักเรียน ห้อง ${currentUser.data.room}`}</span>
+      <div className="flex items-center gap-3">
+        <button onClick={loadDataFromDB} className={`p-2 rounded-full border transition-colors shadow-sm ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`} title="ดึงข้อมูลล่าสุดจากระบบ">
+          <RefreshCw size={18} className={syncStatus === 'syncing' ? 'animate-spin text-blue-500' : ''}/>
+        </button>
+        <div className={`flex items-center rounded-full pr-4 pl-1.5 py-1.5 border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center overflow-hidden shrink-0 mr-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-100 border-slate-200'}`}>
+            {currentUser.data.profileImg ? <img src={getValidImgUrl(currentUser.data.profileImg)} className="w-full h-full object-cover rounded-full"/> : <User size={16} className="text-slate-400" />}
+          </div>
+          <div className="flex flex-col">
+            <span className={`text-sm font-black leading-tight hidden sm:block ${isDark ? 'text-white' : 'text-slate-800'}`}>{currentUser.data.name}</span>
+            <span className="text-[10px] font-bold text-blue-500">{currentUser.role === 'teacher' ? 'แอดมิน' : `นักเรียน ห้อง ${currentUser.data.room}`}</span>
+          </div>
         </div>
       </div>
     </header>
@@ -507,32 +560,6 @@ function TeacherDashboard({ students, subjects, assignments, submissions, attend
   const presentToday = todayAtt.filter(a => a.status === 'present').length;
   const totalBehaviors = behaviors.reduce((sum, b) => sum + getSafeNum(b.points, 0), 0);
 
-  // คำนวณนักเรียน Top 3 ของแต่ละวิชา
-  const topStudentsBySubject = subjects.map(sub => {
-     const enrolledIds = enrollments.filter(e => e.subjectId === sub.id).map(e => String(e.studentId).trim());
-     const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-     const targetAsgs = assignments.filter(a => a.subjectId === sub.id);
-
-     const studentScores = enrolledSts.map(stu => {
-         let asgTotal = 0;
-         targetAsgs.forEach(asg => {
-             const subM = submissions.find(s => s.assignmentId === asg.id && String(s.studentId).trim() === String(stu.id).trim());
-             if (subM && subM.status === 'graded') {
-                 asgTotal += getSafeNum(subM.score, 0);
-             }
-         });
-         const examRec = exams.find(e => e.subjectId === sub.id && String(e.studentId).trim() === String(stu.id).trim()) || {};
-         const mid = getSafeNum(examRec.midterm, 0);
-         const fin = getSafeNum(examRec.final, 0);
-         const grandTotal = asgTotal + mid + fin;
-         return { ...stu, grandTotal };
-     });
-
-     // เรียงลำดับจากมากไปน้อย และดึงแค่ 3 อันดับแรก
-     const top3 = studentScores.sort((a, b) => b.grandTotal - a.grandTotal).slice(0, 3);
-     return { subject: sub, top3 };
-  });
-
   return (
     <div className="space-y-6 max-w-7xl mx-auto animate-in fade-in">
       <h2 className="text-2xl font-black mb-6 border-l-4 border-blue-600 pl-4">ภาพรวมระบบ</h2>
@@ -545,41 +572,33 @@ function TeacherDashboard({ students, subjects, assignments, submissions, attend
         <StatCard title="คะแนนพฤติกรรมสะสม" value={totalBehaviors > 0 ? `+${totalBehaviors}` : totalBehaviors} icon={<Award size={24} className="text-violet-500" />} bg={isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-violet-100'} theme={theme} />
       </div>
 
-      <h2 className="text-xl font-black mt-10 mb-4 border-l-4 border-emerald-500 pl-4">Top 3 นักเรียนคะแนนรวมสูงสุด (แยกตามวิชา)</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-        {topStudentsBySubject.map(({ subject, top3 }) => (
-           <div key={subject.id} className={`p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-             <h3 className="font-black text-lg mb-4 text-blue-600 dark:text-blue-400 flex items-center justify-between">
-               <span className="truncate pr-2">{subject.name}</span>
-               <span className="text-xs font-bold bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 px-2 py-1 rounded-md shrink-0">{subject.code}</span>
-             </h3>
-             {top3.length > 0 ? (
-               <div className="space-y-3">
-                 {top3.map((stu, index) => (
-                   <div key={stu.id} className={`flex items-center justify-between p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-slate-50 border-slate-100'}`}>
-                     <div className="flex items-center gap-3 overflow-hidden">
-                       <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm shrink-0 ${index === 0 ? 'bg-amber-100 text-amber-600 border-2 border-amber-400' : index === 1 ? 'bg-slate-200 text-slate-500 border-2 border-slate-300' : 'bg-orange-100 text-orange-600 border-2 border-orange-300'}`}>
-                         {index + 1}
-                       </div>
-                       <div className="flex flex-col min-w-0">
-                         <span className="font-bold text-sm truncate">{stu.name}</span>
-                         <span className={`text-xs font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>ห้อง {stu.room} | เลขที่ {stu.number}</span>
-                       </div>
-                     </div>
-                     <div className="font-black text-emerald-500 ml-2 shrink-0">{stu.grandTotal} <span className="text-[10px] text-slate-400 font-bold">คะแนน</span></div>
-                   </div>
-                 ))}
-               </div>
-             ) : (
-               <div className={`text-center py-8 text-sm font-bold border-2 border-dashed rounded-2xl ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
-                 ยังไม่มีข้อมูลคะแนน
-               </div>
-             )}
-           </div>
-        ))}
-        {topStudentsBySubject.length === 0 && (
-           <div className={`col-span-full text-center py-8 font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>ยังไม่มีวิชาเรียนในระบบ</div>
-        )}
+      <h3 className="text-xl font-black mt-10 mb-4 border-l-4 border-blue-600 pl-4">สถิติการเข้าเรียนวันนี้ (แยกตามรายวิชา)</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {subjects.map(sub => {
+           const subAtt = todayAtt.filter(a => a.subjectId === sub.id);
+           const p = subAtt.filter(a => a.status === 'present').length;
+           const l = subAtt.filter(a => a.status === 'late').length;
+           const lv = subAtt.filter(a => a.status === 'leave').length;
+           const ab = subAtt.filter(a => a.status === 'absent').length;
+
+           return (
+              <div key={sub.id} className={`p-5 rounded-2xl border shadow-sm flex flex-col justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                 <div className="font-bold mb-4 text-blue-600 dark:text-blue-400">{sub.name}</div>
+                 {subAtt.length > 0 ? (
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs font-bold">
+                       <div className={`py-2 rounded-lg ${isDark ? 'bg-green-900/30 text-green-400' : 'bg-green-50 text-green-600'}`}>มา<br/><span className="text-xl">{p}</span></div>
+                       <div className={`py-2 rounded-lg ${isDark ? 'bg-amber-900/30 text-amber-400' : 'bg-amber-50 text-amber-600'}`}>สาย<br/><span className="text-xl">{l}</span></div>
+                       <div className={`py-2 rounded-lg ${isDark ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>ลา<br/><span className="text-xl">{lv}</span></div>
+                       <div className={`py-2 rounded-lg ${isDark ? 'bg-red-900/30 text-red-400' : 'bg-red-50 text-red-600'}`}>ขาด<br/><span className="text-xl">{ab}</span></div>
+                    </div>
+                 ) : (
+                    <div className={`text-sm text-center py-5 rounded-xl font-bold ${isDark ? 'bg-slate-900 border border-slate-700 text-slate-500' : 'bg-slate-50 border border-slate-100 text-slate-400'}`}>
+                      ยังไม่มีการเช็กชื่อในวันนี้
+                    </div>
+                 )}
+              </div>
+           );
+        })}
       </div>
     </div>
   );
@@ -594,156 +613,172 @@ function StatCard({ title, value, icon, bg, theme }) {
   );
 }
 
-function TeacherAnnouncements({ announcements, setAnnouncements, subjects, getUniqueRooms, dbUrl, showToast, theme }) {
+function TeacherAnnouncements({ announcements, saveState, showToast, theme, dbUrl, confirmAction, students }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: '', content: '', linkUrl: '', targetSubject: 'all', targetRoom: 'all' });
-  const [imageFile, setImageFile] = useState(null);
+  const [form, setForm] = useState({ title: '', content: '', linkUrl: '', targetRooms: [] });
+  const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [confirmDel, setConfirmDel] = useState(null); 
   const isDark = theme === 'dark';
+
+  const allRooms = students ? [...new Set(students.map(s => String(s.room)))].filter(Boolean).sort() : [];
+
+  const handleRoomToggle = (room) => {
+    if(form.targetRooms.includes(room)) {
+      setForm({...form, targetRooms: form.targetRooms.filter(r => r !== room)});
+    } else {
+      setForm({...form, targetRooms: [...form.targetRooms, room]});
+    }
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
-    if (!form.title || !form.content) return showToast('กรุณากรอกหัวข้อและเนื้อหาประกาศให้ครบถ้วน');
+    setIsUploading(true);
+
+    let finalImageUrl = '';
     
-    let uploadedImageUrl = '';
-    if (imageFile) {
-      if (!dbUrl) return showToast('กรุณาตั้งค่า Database URL เพื่ออัปโหลดรูปภาพ');
-      setIsUploading(true);
+    if (file) {
+      if (!dbUrl) { setIsUploading(false); return showToast('กรุณาตั้งค่า Database URL เพื่ออัปโหลดรูปภาพ'); }
+      showToast('กำลังย่อขนาดและอัปโหลดรูปภาพ...');
       try {
-        const reader = new FileReader();
-        reader.readAsDataURL(imageFile);
-        await new Promise((resolve) => {
-          reader.onload = async () => {
-            const base64 = reader.result.split(',')[1];
-            const payload = { action: 'uploadMaterial', filename: `ann_${Date.now()}_${imageFile.name}`, mimeType: imageFile.type, fileData: base64 };
-            const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-            const data = await res.json();
-            if (data.url) uploadedImageUrl = data.url;
-            resolve();
-          };
-        });
-      } catch (error) { showToast('อัปโหลดรูปล้มเหลว ประกาศจะถูกสร้างโดยไม่มีรูป'); } finally { setIsUploading(false); }
+        const base64DataUrl = await compressImage(file, 800); 
+        const base64 = base64DataUrl.split(',')[1];
+        const payload = { action: 'uploadFile', type: 'announcement', filename: `Ann_${Date.now()}.jpg`, mimeType: 'image/jpeg', fileData: base64 };
+        const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.url) finalImageUrl = data.url;
+      } catch(err) {
+        setIsUploading(false);
+        return showToast('อัปโหลดรูปล้มเหลว ตรวจสอบอินเทอร์เน็ต');
+      }
     }
 
-    const newAnn = { ...form, id: `ann${Date.now()}`, date: new Date().toLocaleString('th-TH'), imageUrl: uploadedImageUrl };
-    setAnnouncements([newAnn, ...announcements]);
-    setShowForm(false); showToast('สร้างประกาศสำเร็จ');
-    setForm({ title: '', content: '', linkUrl: '', targetSubject: 'all', targetRoom: 'all' });
-    setImageFile(null);
+    const newAnn = { ...form, id: `ann${Date.now()}`, date: new Date().toLocaleString('th-TH'), imageUrl: finalImageUrl };
+    saveState({ announcements: [newAnn, ...announcements] });
+    
+    setShowForm(false);
+    setIsUploading(false);
+    showToast('สร้างประกาศสำเร็จ');
+    setForm({ title: '', content: '', linkUrl: '', targetRooms: [] });
+    setFile(null);
   };
 
-  const executeDelete = () => { setAnnouncements(announcements.filter(a => a.id !== confirmDel)); setConfirmDel(null); showToast('ลบประกาศเรียบร้อยแล้ว'); };
+  const handleDelete = (id) => {
+    if(confirmAction) {
+      confirmAction('ยืนยันลบประกาศนี้ใช่หรือไม่?', async () => {
+        saveState({ announcements: announcements.filter(a => a.id !== id) }, true);
+        if (dbUrl) {
+          try {
+            await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'deleteRecord', sheetName: 'announcements', keyField: 'id', keyValue: String(id) }) });
+            showToast('ลบประกาศสำเร็จ');
+          } catch(e) {}
+        }
+      });
+    }
+  };
 
-  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`;
+  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <ConfirmModal isOpen={!!confirmDel} title="ยืนยันการลบประกาศ" message="คุณต้องการลบประกาศข่าวสารนี้ใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้" onConfirm={executeDelete} onCancel={() => setConfirmDel(null)} theme={theme} />
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3"><Bell className="mr-2 text-blue-500"/> จัดการประกาศข่าวสาร</h2>
-        <button onClick={() => setShowForm(!showForm)} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors"><Plus size={16} className="inline mr-2"/> สร้างประกาศ</button>
+        <button onClick={() => setShowForm(!showForm)} className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md"><Plus size={16} className="inline mr-2"/> สร้างประกาศ</button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleSave} className={`p-6 md:p-8 rounded-3xl shadow-sm space-y-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div><label className="block text-sm font-bold mb-2">หัวข้อประกาศ *</label><input required type="text" value={form.title} onChange={e=>setForm({...form, title: e.target.value})} className={inputClass} placeholder="เช่น ปิดปรับปรุงระบบ / กิจกรรมวันสำคัญ..." /></div>
-          <div><label className="block text-sm font-bold mb-2">เนื้อหาประกาศ *</label><textarea required rows="4" value={form.content} onChange={e=>setForm({...form, content: e.target.value})} className={inputClass} placeholder="รายละเอียดที่ต้องการแจ้งให้นักเรียนทราบ..." /></div>
+        <form onSubmit={handleSave} className={`p-6 rounded-3xl shadow-sm space-y-4 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div><label className="block text-sm font-bold mb-2">หัวข้อประกาศ</label><input required type="text" value={form.title} onChange={e=>setForm({...form, title: e.target.value})} className={inputClass} placeholder="หัวข้อประกาศ..." /></div>
+          <div><label className="block text-sm font-bold mb-2">เนื้อหาประกาศ</label><textarea required rows="4" value={form.content} onChange={e=>setForm({...form, content: e.target.value})} className={inputClass} placeholder="รายละเอียดประกาศ..." /></div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-4 border-t border-dashed border-slate-300 dark:border-slate-600">
-            <div>
-              <label className="block text-sm font-bold mb-2 flex items-center"><Layers size={16} className="mr-2 text-blue-500"/> แสดงเฉพาะวิชา</label>
-              <select value={form.targetSubject} onChange={e=>setForm({...form, targetSubject: e.target.value})} className={inputClass}><option value="all">ทุกวิชา (เห็นทุกคน)</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-            </div>
-            <div>
-              <label className="block text-sm font-bold mb-2 flex items-center"><Users size={16} className="mr-2 text-emerald-500"/> แสดงเฉพาะห้องเรียน</label>
-              <select value={form.targetRoom} onChange={e=>setForm({...form, targetRoom: e.target.value})} className={inputClass}><option value="all">ทุกห้อง (เห็นทุกคน)</option>{getUniqueRooms().map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
+          <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+            <label className="block text-sm font-bold mb-2 text-blue-500">มอบหมายให้ห้อง (เว้นว่าง = ประกาศให้ทุกคน)</label>
+            <div className="flex flex-wrap gap-2">
+              <label className={`flex items-center px-4 py-2 rounded-xl border cursor-pointer transition-all ${form.targetRooms.length === 0 ? (isDark ? 'bg-blue-600 border-blue-600 text-white' : 'bg-blue-100 border-blue-300 text-blue-800') : (isDark ? 'border-slate-700 bg-slate-900 text-slate-400' : 'border-slate-200 bg-white text-slate-500')}`}>
+                <input type="checkbox" checked={form.targetRooms.length === 0} onChange={() => setForm({...form, targetRooms: []})} className="hidden" />ทุกห้อง
+              </label>
+              {allRooms.map(r => (
+                <label key={r} className={`flex items-center px-4 py-2 rounded-xl border cursor-pointer transition-all ${form.targetRooms.includes(r) ? (isDark ? 'bg-blue-600 border-blue-600 text-white' : 'bg-blue-100 border-blue-300 text-blue-800') : (isDark ? 'border-slate-700 bg-slate-900 text-slate-400' : 'border-slate-200 bg-white text-slate-500')}`}>
+                  <input type="checkbox" checked={form.targetRooms.includes(r)} onChange={() => handleRoomToggle(r)} className="hidden" />ห้อง {r}
+                </label>
+              ))}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-4 border-t border-dashed border-slate-300 dark:border-slate-600">
-            <div><label className="block text-sm font-bold mb-2 flex items-center"><ExternalLink size={16} className="mr-2 text-indigo-500"/> แนบลิงก์เพิ่มเติม (ถ้ามี)</label><input type="text" value={form.linkUrl} onChange={e=>setForm({...form, linkUrl: e.target.value})} className={inputClass} placeholder="เช่น https://www.google.com" /></div>
-            <div>
-              <label className="block text-sm font-bold mb-2 flex items-center"><ImageIcon size={16} className="mr-2 text-pink-500"/> แนบรูปภาพประกอบ (ถ้ามี)</label>
-              <div className={`border-2 border-dashed rounded-xl p-3 text-center relative cursor-pointer transition-colors ${isDark ? 'border-slate-600 bg-slate-900/50 hover:border-pink-500' : 'border-slate-300 bg-slate-50 hover:border-pink-500'}`}>
-                 <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-                 <span className={`text-sm font-bold ${imageFile ? 'text-pink-500' : (isDark ? 'text-slate-400' : 'text-slate-500')}`}>{imageFile ? imageFile.name : 'คลิกเพื่อเลือกไฟล์รูปภาพ'}</span>
-              </div>
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <div><label className="block text-sm font-bold mb-2 flex items-center"><LinkIcon size={16} className="mr-2"/> แนบลิงก์ (URL) เช่น Google Drive</label><input type="url" value={form.linkUrl} onChange={e=>setForm({...form, linkUrl: e.target.value})} className={inputClass} placeholder="https://..." /></div>
+             <div><label className="block text-sm font-bold mb-2 flex items-center"><ImageIcon size={16} className="mr-2"/> แนบรูปภาพประกอบ</label><input type="file" accept="image/*" onChange={e=>setFile(e.target.files[0])} className={inputClass} /></div>
           </div>
-          <div className="flex justify-end pt-4"><button type="submit" disabled={isUploading} className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md flex items-center disabled:opacity-50">{isUploading ? <><RefreshCw size={18} className="mr-2 animate-spin"/> กำลังอัปโหลด...</> : 'บันทึกและประกาศ'}</button></div>
+
+          <div className="flex justify-end mt-4"><button type="submit" disabled={isUploading} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold disabled:opacity-50">{isUploading ? 'กำลังอัปโหลด...' : 'บันทึกประกาศ'}</button></div>
         </form>
       )}
 
-      <div className="space-y-5">
-        {announcements.map(ann => {
-          const targetedSubjectName = ann.targetSubject !== 'all' ? subjects.find(s => s.id === ann.targetSubject)?.name : 'ทุกวิชา';
-          return (
-            <div key={ann.id} className={`p-6 rounded-3xl shadow-sm relative group border flex flex-col md:flex-row gap-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              <button onClick={() => setConfirmDel(ann.id)} className="absolute top-4 right-4 p-2 text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={18}/></button>
-              {ann.imageUrl && (
-                <div className="w-full md:w-64 h-40 shrink-0 rounded-2xl overflow-hidden border border-slate-200 shadow-sm"><img src={getValidImgUrl(ann.imageUrl)} alt="Announcement" className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"/></div>
-              )}
-              <div className="flex-1 flex flex-col">
-                <div className="flex flex-wrap gap-2 mb-3">
-                   <div className={`text-xs font-bold flex items-center px-2 py-1 rounded-md ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-slate-100 text-slate-500'}`}><Clock size={12} className="mr-1.5"/> {ann.date}</div>
-                   {(ann.targetSubject !== 'all' || ann.targetRoom !== 'all') && (
-                     <div className="text-xs font-bold text-white bg-amber-500 px-3 py-1 rounded-md shadow-sm">เฉพาะ: {ann.targetSubject !== 'all' ? targetedSubjectName : 'ทุกวิชา'} {ann.targetRoom !== 'all' ? `(ห้อง ${ann.targetRoom})` : ''}</div>
-                   )}
-                </div>
-                <h3 className="text-2xl font-black mb-3 pr-8 text-blue-600 dark:text-blue-400">{ann.title}</h3>
-                <p className={`whitespace-pre-wrap font-medium mb-5 flex-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{ann.content}</p>
-                {ann.linkUrl && (
-                  <div className="mt-auto pt-4"><a href={ann.linkUrl.startsWith('http') ? ann.linkUrl : `https://${ann.linkUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><ExternalLink size={14} className="mr-2"/> เปิดลิงก์แนบ</a></div>
-                )}
-              </div>
+      <div className="space-y-4">
+        {announcements.map(ann => (
+          <div key={ann.id} className={`p-6 rounded-2xl shadow-sm relative group border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <button onClick={() => handleDelete(ann.id)} className={`absolute top-4 right-4 p-2 rounded-lg transition-colors z-10 ${isDark ? 'bg-slate-700 text-red-400 hover:bg-slate-600' : 'bg-red-50 text-red-500 hover:bg-red-100'}`} title="ลบประกาศ"><Trash2 size={18}/></button>
+            <div className="mb-3">
+              <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+                ส่งถึง: {!ann.targetRooms || ann.targetRooms.length === 0 ? 'ทุกห้อง' : `ห้อง ${ann.targetRooms.join(', ')}`}
+              </span>
             </div>
-          );
-        })}
-        {announcements.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีการสร้างประกาศข่าวสาร</div>}
+            <h3 className="text-xl font-black mb-3 pr-12">{ann.title}</h3>
+            {ann.imageUrl && <img src={getValidImgUrl(ann.imageUrl)} alt="Announcement" className="w-full max-h-64 object-cover rounded-xl mb-4 border shadow-sm border-slate-200 dark:border-slate-700" />}
+            <p className={`whitespace-pre-wrap text-sm mb-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{ann.content}</p>
+            
+            {ann.linkUrl && <a href={ann.linkUrl} target="_blank" rel="noreferrer" className={`mb-4 inline-flex items-center text-sm font-bold px-4 py-2 rounded-xl transition-colors ${isDark ? 'bg-blue-900/30 text-blue-400 hover:bg-blue-900/50' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}><ExternalLink size={16} className="mr-2"/> เปิดลิงก์แนบ</a>}
+            
+            <div className={`text-xs font-bold mt-2 pt-4 border-t ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-100'}`}>ประกาศเมื่อ: {ann.date}</div>
+          </div>
+        ))}
+        {announcements.length === 0 && <div className="text-center py-12 text-slate-500 font-bold">ยังไม่มีประกาศข่าวสาร</div>}
       </div>
     </div>
   );
 }
 
-function TeacherSubjects({ subjects, setSubjects, showToast, theme }) {
+function TeacherSubjects({ subjects, saveState, showToast, theme, dbUrl, confirmAction }) {
   const [showForm, setShowForm] = useState(false);
   const [newSub, setNewSub] = useState({ code: '', name: '', semester: '1', year: new Date().getFullYear() + 543 + '', midtermMax: 20, finalMax: 30 });
-  const [editSub, setEditSub] = useState(null); 
-  const [confirmDel, setConfirmDel] = useState(null); 
   const isDark = theme === 'dark';
 
-  const handleSaveCreate = (e) => {
+  const handleSave = (e) => {
     e.preventDefault();
-    setSubjects([...subjects, { ...newSub, id: `sub${Date.now()}` }]);
-    setShowForm(false); showToast('สร้างวิชาใหม่สำเร็จ');
+    saveState({ subjects: [...subjects, { ...newSub, id: `sub${Date.now()}` }] });
+    setShowForm(false); showToast('สร้างวิชาใหม่สำเร็จ ซิงค์ข้อมูลลงระบบแล้ว');
     setNewSub({ code: '', name: '', semester: '1', year: new Date().getFullYear() + 543 + '', midtermMax: 20, finalMax: 30 });
   };
 
-  const handleSaveEdit = (e) => {
-    e.preventDefault();
-    setSubjects(subjects.map(s => s.id === editSub.id ? editSub : s));
-    setEditSub(null); showToast('บันทึกการแก้ไขรายวิชาสำเร็จ');
+  const handleDelete = (id) => { 
+    if(confirmAction) {
+      confirmAction('ยืนยันลบวิชานี้ใช่หรือไม่? (งานและคะแนนในวิชานี้จะถูกลบไปด้วย)', async () => {
+        saveState({ subjects: subjects.filter(s=>s.id!==id) }, true); 
+        if (dbUrl) {
+          try {
+            await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'deleteRecord', sheetName: 'subjects', keyField: 'id', keyValue: String(id) }) });
+            showToast('ลบวิชาสำเร็จ');
+          } catch(e) {}
+        }
+      });
+    }
   };
-
-  const executeDelete = () => { setSubjects(subjects.filter(s => s.id !== confirmDel)); setConfirmDel(null); showToast('ลบวิชาเรียบร้อยแล้ว'); };
 
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 border font-bold ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 relative">
-      <ConfirmModal isOpen={!!confirmDel} title="ยืนยันการลบวิชาเรียน" message="คุณต้องการลบรายวิชานี้ใช่หรือไม่? ข้อมูลการลงทะเบียนเรียนและคะแนนที่ผูกกับวิชานี้อาจได้รับผลกระทบ" onConfirm={executeDelete} onCancel={() => setConfirmDel(null)} theme={theme} />
+    <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3"><Layers className="mr-2 text-blue-500"/> จัดการวิชาเรียน</h2>
         <button onClick={() => setShowForm(!showForm)} className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md"><Plus size={16} className="inline mr-2"/> สร้างวิชา</button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleSaveCreate} className={`p-6 rounded-3xl shadow-sm grid grid-cols-1 md:grid-cols-2 gap-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <form onSubmit={handleSave} className={`p-6 rounded-3xl shadow-sm grid grid-cols-1 md:grid-cols-2 gap-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div><label className="block text-sm font-bold mb-2">รหัสวิชา</label><input required type="text" value={newSub.code} onChange={e=>setNewSub({...newSub, code: e.target.value})} className={inputClass} placeholder="เช่น ว21101" /></div>
           <div><label className="block text-sm font-bold mb-2">ชื่อวิชา</label><input required type="text" value={newSub.name} onChange={e=>setNewSub({...newSub, name: e.target.value})} className={inputClass} /></div>
           <div><label className="block text-sm font-bold mb-2">ภาคเรียน</label><select value={newSub.semester} onChange={e=>setNewSub({...newSub, semester: e.target.value})} className={inputClass}><option value="1">1</option><option value="2">2</option></select></div>
           <div><label className="block text-sm font-bold mb-2">ปีการศึกษา</label><input required type="text" value={newSub.year} onChange={e=>setNewSub({...newSub, year: e.target.value})} className={inputClass} /></div>
+          
           <div className={`md:col-span-2 p-5 rounded-2xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
             <h4 className="font-bold text-blue-500 mb-4 flex items-center"><Settings size={16} className="mr-2" /> ตั้งค่าคะแนนเต็มสำหรับการสอบ</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -751,401 +786,312 @@ function TeacherSubjects({ subjects, setSubjects, showToast, theme }) {
               <div><label className="block text-sm font-bold mb-2">คะแนนเต็ม ปลายภาค</label><input required type="number" min="0" value={newSub.finalMax} onChange={e=>setNewSub({...newSub, finalMax: parseInt(e.target.value) || 0})} className={inputClass} /></div>
             </div>
           </div>
+
           <div className="md:col-span-2 flex justify-end mt-2"><button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">บันทึกวิชา</button></div>
         </form>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {subjects.map(sub => (
-          <div key={sub.id} className={`p-6 rounded-2xl shadow-sm relative group border flex flex-col justify-between transition-all ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-blue-300'}`}>
+          <div key={sub.id} className={`p-6 rounded-2xl shadow-sm relative group border flex flex-col justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             <div>
-              <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                 <button onClick={() => setEditSub(sub)} className={`p-1.5 rounded-lg transition-colors text-amber-500 ${isDark ? 'bg-amber-500/10 hover:bg-amber-500/20' : 'bg-amber-50 hover:bg-amber-100'}`} title="แก้ไขข้อมูลวิชา"><Edit size={16}/></button>
-                 <button onClick={() => setConfirmDel(sub.id)} className={`p-1.5 rounded-lg transition-colors text-red-500 ${isDark ? 'bg-red-500/10 hover:bg-red-500/20' : 'bg-red-50 hover:bg-red-100'}`} title="ลบวิชา"><Trash2 size={16}/></button>
-              </div>
+              <button onClick={() => handleDelete(sub.id)} className={`absolute top-4 right-4 p-2 rounded-lg transition-colors z-10 ${isDark ? 'bg-slate-700 text-red-400 hover:bg-slate-600' : 'bg-red-50 text-red-500 hover:bg-red-100'}`} title="ลบวิชา"><Trash2 size={18}/></button>
               <div className="text-blue-500 font-bold font-mono text-xs bg-blue-500/10 px-3 py-1.5 rounded-lg inline-block">{sub.code}</div>
-              <h3 className="text-xl font-black mt-4">{sub.name}</h3>
+              <h3 className="text-xl font-black mt-4 pr-10">{sub.name}</h3>
               <div className={`text-sm font-bold mt-4 p-2.5 rounded-xl flex items-center ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-slate-50 text-slate-500'}`}><Calendar size={14} className="mr-2"/> เทอม {sub.semester}/{sub.year}</div>
             </div>
             <div className={`text-xs font-bold mt-4 pt-4 border-t flex flex-col gap-1.5 ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
-              <div className="flex justify-between"><span>กลางภาค</span><span className="text-amber-500">เต็ม {sub.midtermMax ?? 20}</span></div>
-              <div className="flex justify-between"><span>ปลายภาค</span><span className="text-emerald-500">เต็ม {sub.finalMax ?? 30}</span></div>
+              <div className="flex justify-between"><span>กลางภาค</span><span className="text-amber-500">เต็ม {sub.midtermMax || 20}</span></div>
+              <div className="flex justify-between"><span>ปลายภาค</span><span className="text-emerald-500">เต็ม {sub.finalMax || 30}</span></div>
             </div>
           </div>
         ))}
       </div>
-
-      {editSub && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className={`rounded-3xl w-full max-w-xl p-8 shadow-2xl relative border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <button onClick={() => setEditSub(null)} className={`absolute top-5 right-5 p-2 rounded-full transition-colors ${isDark ? 'text-slate-400 hover:text-white bg-slate-900' : 'text-slate-500 hover:text-slate-900 bg-slate-100'}`}><X size={20}/></button>
-            <h3 className="text-xl font-black mb-6 flex items-center"><Edit className="mr-2 text-amber-500"/> แก้ไขรายวิชา</h3>
-            <form onSubmit={handleSaveEdit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="block text-sm font-bold mb-2">รหัสวิชา</label><input required type="text" value={editSub.code || ''} onChange={e=>setEditSub({...editSub, code: e.target.value})} className={inputClass} /></div>
-              <div><label className="block text-sm font-bold mb-2">ชื่อวิชา</label><input required type="text" value={editSub.name || ''} onChange={e=>setEditSub({...editSub, name: e.target.value})} className={inputClass} /></div>
-              <div><label className="block text-sm font-bold mb-2">ภาคเรียน</label><select value={editSub.semester || '1'} onChange={e=>setEditSub({...editSub, semester: e.target.value})} className={inputClass}><option value="1">1</option><option value="2">2</option></select></div>
-              <div><label className="block text-sm font-bold mb-2">ปีการศึกษา</label><input required type="text" value={editSub.year || ''} onChange={e=>setEditSub({...editSub, year: e.target.value})} className={inputClass} /></div>
-              <div className={`md:col-span-2 p-5 rounded-2xl mt-2 border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                <h4 className="font-bold text-amber-500 mb-4 flex items-center"><Settings size={16} className="mr-2" /> แก้ไขคะแนนเต็มสำหรับการสอบ</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-bold mb-2">คะแนนเต็ม กลางภาค</label><input required type="number" min="0" value={editSub.midtermMax ?? 20} onChange={e=>setEditSub({...editSub, midtermMax: parseInt(e.target.value) || 0})} className={inputClass} /></div>
-                  <div><label className="block text-sm font-bold mb-2">คะแนนเต็ม ปลายภาค</label><input required type="number" min="0" value={editSub.finalMax ?? 30} onChange={e=>setEditSub({...editSub, finalMax: parseInt(e.target.value) || 0})} className={inputClass} /></div>
-                </div>
-              </div>
-              <div className="md:col-span-2 flex justify-end mt-4"><button type="submit" className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold shadow-md w-full md:w-auto">บันทึกการแก้ไข</button></div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function TeacherStudents({ subjects, students, setStudents, enrollments, setEnrollments, assignments, submissions, behaviors, saveState, showToast, theme, getUniqueRooms, getUniqueSections }) {
+function TeacherStudents({ subjects, students, enrollments, saveState, showToast, theme, dbUrl, confirmAction }) {
   const [filterSub, setFilterSub] = useState('all');
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSection, setFilterSection] = useState('all');
   
   const [showImport, setShowImport] = useState(false);
   const [showAddSingle, setShowAddSingle] = useState(false);
-  const [showBatchEnroll, setShowBatchEnroll] = useState(false);
+  const [showEnrollModal, setShowEnrollModal] = useState(false);
+  
   const [pasteData, setPasteData] = useState('');
   const [importSub, setImportSub] = useState(subjects[0]?.id || '');
-  
   const [singleStu, setSingleStu] = useState({ id: '', name: '', number: '', section: '', room: '', subjectId: '' });
-  const [editForm, setEditForm] = useState(null);
-  const [confirmDel, setConfirmDel] = useState(null); 
-  const [viewingStudent, setViewingStudent] = useState(null);
-
-  const [batchSub, setBatchSub] = useState(subjects[0]?.id || '');
-  const [batchRoom, setBatchRoom] = useState('');
+  const [enrollSelections, setEnrollSelections] = useState([]);
 
   const isDark = theme === 'dark';
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
 
-  const enrolledStudentIds = filterSub === 'all' ? students.map(s => String(s.id).trim()) : enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
-  const dynamicRooms = getUniqueRooms();
-  const dynamicSections = getUniqueSections(filterRoom);
-
-  const targetStudents = students
-      .filter(s => enrolledStudentIds.includes(String(s.id).trim()))
-      .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
-      .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
-
-  const handleExportExcel = () => {
-    let csv = '\uFEFF'; 
-    csv += 'รหัสประจำตัว,ชื่อ-สกุล,เลขที่,ห้อง,ตอน,เบอร์นักเรียน,เบอร์ผู้ปกครอง,ความสัมพันธ์\n';
+  const enrolledStudentIds = filterSub === 'all' 
+    ? students.map(s => String(s.id)) 
+    : enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId));
     
-    targetStudents.forEach(stu => {
-       csv += `="${stu.id}","${stu.name}",${stu.number},="${stu.room}","${stu.section || ''}","${stu.studentPhone || ''}","${stu.parentPhone || ''}","${stu.parentRelation || ''}"\n`;
-    });
+  const enrolledSts = students.filter(s => enrolledStudentIds.includes(String(s.id)));
+  const dynamicRooms = [...new Set(enrolledSts.map(s => s.room))].filter(Boolean).sort();
+  const dynamicSections = [...new Set(enrolledSts.filter(s => filterRoom === 'all' || String(s.room) === String(filterRoom)).map(s => String(s.section || '')))].filter(s => s && s !== '-').sort();
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = `Student_Data_${filterRoom !== 'all' ? 'Room_'+filterRoom : 'All'}.csv`; link.click();
-    showToast('ดาวน์โหลดไฟล์ข้อมูลนักเรียนเรียบร้อยแล้ว');
-  };
+  const targetStudents = enrolledSts.filter(s => 
+    (filterRoom === 'all' || String(s.room) === String(filterRoom)) && 
+    (filterSection === 'all' || String(s.section || '') === String(filterSection))
+  );
+
+  const notEnrolledStudents = filterSub === 'all' ? [] : students.filter(s => !enrolledStudentIds.includes(String(s.id)));
 
   const handleBulkImport = () => {
     if (!importSub) return showToast('เลือกวิชาก่อนนำเข้า');
-    const lines = pasteData.trim().split('\n'); const newSts = []; const newEnrolls = [];
+    const lines = pasteData.trim().split('\n'); 
+    const currentStudentsMap = new Map(students.map(s => [String(s.id), s]));
+    const newEnrolls = [];
+    
     lines.forEach(line => {
-      const parts = line.split('\t'); if(parts.length < 2) return;
-      const id = parts[0]?.trim(), name = parts[1]?.trim(), number = parts[2]?.trim() || '', section = parts[3]?.trim() || '-', room = parts[4]?.trim() || '';
+      const parts = line.split('\t'); 
+      if(parts.length < 2) return;
+      
+      const id = parts[0]?.trim();
+      const name = parts[1]?.trim();
+      const number = parts[2]?.trim() || '';
+      const section = parts[3]?.trim() || '-';
+      const room = parts[4]?.trim() || '';
+      
       if(!id || !name) return;
-      if(!students.find(s => String(s.id).trim() === String(id)) && !newSts.find(s => String(s.id).trim() === String(id))) newSts.push({ id, password: '12345678', name, number, section, room, profileImg: '' });
-      if(!enrollments.find(e => String(e.studentId).trim() === String(id) && e.subjectId === importSub) && !newEnrolls.find(e => String(e.studentId).trim() === String(id) && e.subjectId === importSub)) 
-        newEnrolls.push({ id: `e${Date.now()}_${id}`, studentId: id, subjectId: importSub });
+
+      if (!currentStudentsMap.has(id)) {
+        currentStudentsMap.set(id, { id, password: '12345678', name, number, section, room, profileImg: '', studentPhone: '', parentPhone: '' });
+      }
+
+      const isEnrolled = enrollments.find(e => String(e.studentId) === id && e.subjectId === importSub) || 
+                         newEnrolls.find(e => String(e.studentId) === id && e.subjectId === importSub);
+                         
+      if(!isEnrolled) {
+        newEnrolls.push({ id: `e${Date.now()}_${id}_${Math.random()}`, studentId: id, subjectId: importSub });
+      }
     });
-    if(newSts.length > 0 || newEnrolls.length > 0) {
-      saveState({ students: [...students, ...newSts], enrollments: [...enrollments, ...newEnrolls] });
-      showToast(`สำเร็จ: ใหม่ ${newSts.length} คน / ลงทะเบียน ${newEnrolls.length} รายการ`); 
-      setShowImport(false); setPasteData('');
-    } else showToast('ไม่มีข้อมูลใหม่');
+
+    const updatedStudents = Array.from(currentStudentsMap.values());
+    const addedStudentsCount = updatedStudents.length - students.length;
+
+    if(addedStudentsCount > 0 || newEnrolls.length > 0) {
+      saveState({ students: updatedStudents, enrollments: [...enrollments, ...newEnrolls] });
+      showToast(`บันทึกข้อมูลและซิงค์ลงระบบสำเร็จ: เพิ่มนักเรียนใหม่ ${addedStudentsCount} คน / ลงทะเบียนรายวิชา ${newEnrolls.length} รายการ`); 
+      setShowImport(false); 
+      setPasteData('');
+    } else {
+      showToast('ไม่มีข้อมูลใหม่ให้บันทึก (นักเรียนอยู่ในวิชานี้อยู่แล้ว)');
+    }
   };
 
   const handleAddSingle = (e) => {
     e.preventDefault();
     if (!singleStu.id || !singleStu.name) return showToast('กรุณากรอกรหัสและชื่อ');
-    const exists = students.find(s => String(s.id).trim() === String(singleStu.id).trim());
     
-    let newStudents = students;
-    if (!exists) {
-        newStudents = [...students, { id: singleStu.id.trim(), password: '12345678', name: singleStu.name, number: singleStu.number, section: singleStu.section || '-', room: singleStu.room.trim(), profileImg: '' }];
+    const existingStudent = students.find(s => String(s.id) === String(singleStu.id));
+    let newStudents = [...students];
+    let newEnrolls = [...enrollments];
+
+    if (!existingStudent) {
+       newStudents.push({ id: singleStu.id, password: '12345678', name: singleStu.name, number: singleStu.number, section: singleStu.section || '-', room: singleStu.room, profileImg: '', studentPhone: '', parentPhone: '' });
     }
 
-    let newEnrollments = enrollments;
     if (singleStu.subjectId) {
-       const isEnrolled = enrollments.find(en => String(en.studentId).trim() === String(singleStu.id).trim() && en.subjectId === singleStu.subjectId);
+       const isEnrolled = enrollments.find(en => String(en.studentId) === String(singleStu.id) && en.subjectId === singleStu.subjectId);
        if (!isEnrolled) {
-           newEnrollments = [...enrollments, { id: `e${Date.now()}_${singleStu.id}`, studentId: singleStu.id.trim(), subjectId: singleStu.subjectId }];
+          newEnrolls.push({ id: `e${Date.now()}_${singleStu.id}`, studentId: singleStu.id, subjectId: singleStu.subjectId });
        }
     }
     
-    saveState({ students: newStudents, enrollments: newEnrollments });
-    showToast('เพิ่มนักเรียนสำเร็จ'); 
-    setSingleStu({ id: '', name: '', number: '', section: '', room: '', subjectId: singleStu.subjectId }); 
+    saveState({ students: newStudents, enrollments: newEnrolls });
+    showToast(existingStudent ? 'เพิ่มนักเรียนเข้าสู่วิชาและซิงค์สำเร็จ (นักเรียนมีในระบบอยู่แล้ว)' : 'เพิ่มนักเรียนใหม่และซิงค์ข้อมูลสำเร็จ');
+    setSingleStu({ id: '', name: '', number: '', section: '', room: '', subjectId: singleStu.subjectId });
     setShowAddSingle(false);
   };
 
-  const handleBatchEnrollSubmit = () => {
-    if (!batchSub || !batchRoom) return showToast('กรุณาเลือกวิชาและห้องที่ต้องการลงทะเบียน');
-    const studentsInRoom = students.filter(s => String(s.room).trim() === String(batchRoom).trim());
-    if (studentsInRoom.length === 0) return showToast('ไม่พบรายชื่อนักเรียนในห้องที่เลือก');
-    
-    const newEnrolls = [];
-    studentsInRoom.forEach(s => {
-       const exists = enrollments.find(e => String(e.studentId).trim() === String(s.id).trim() && e.subjectId === batchSub);
-       if (!exists) newEnrolls.push({ id: `e${Date.now()}_${s.id}_${batchSub}`, studentId: s.id, subjectId: batchSub });
-    });
-    
-    if (newEnrolls.length > 0) {
-       saveState({ enrollments: [...enrollments, ...newEnrolls] }); 
-       showToast(`ลงทะเบียนวิชานี้ให้นักเรียนห้อง ${batchRoom} จำนวน ${newEnrolls.length} คนสำเร็จ`); 
-       setShowBatchEnroll(false);
-    } else { showToast('นักเรียนทุกคนในห้องนี้ลงทะเบียนวิชานี้ครบอยู่แล้ว'); }
+  const handleEnrollSelected = () => {
+     if (enrollSelections.length === 0) return showToast('กรุณาเลือกนักเรียนอย่างน้อย 1 คน');
+     const newEnrolls = enrollSelections.map(stuId => ({
+        id: `e${Date.now()}_${stuId}_${Math.random()}`,
+        studentId: stuId,
+        subjectId: filterSub
+     }));
+     saveState({ enrollments: [...enrollments, ...newEnrolls] });
+     showToast(`เพิ่มนักเรียน ${enrollSelections.length} คน เข้าวิชานี้สำเร็จ`);
+     setShowEnrollModal(false);
+     setEnrollSelections([]);
   };
 
-  const executeDelete = () => {
-     saveState({
-         students: students.filter(x => x.id !== confirmDel),
-         enrollments: enrollments.filter(x => x.studentId !== confirmDel)
-     });
-     setConfirmDel(null); 
-     showToast('ลบนักเรียนออกจากระบบสำเร็จ');
-  };
-
-  const openEdit = (e, s) => {
-    e.stopPropagation();
-    const enrolledSubIds = enrollments.filter(e => String(e.studentId).trim() === String(s.id).trim()).map(e => e.subjectId);
-    setEditForm({ ...s, enrolledSubjectIds: enrolledSubIds });
-  };
-
-  const handleSaveEdit = (e) => {
-    e.preventDefault();
-    const updatedStudents = students.map(s => String(s.id).trim() === String(editForm.id).trim() ? { ...s, name: editForm.name, room: editForm.room, number: editForm.number, section: editForm.section } : s);
-    
-    let newEnrollments = enrollments.filter(e => String(e.studentId).trim() !== String(editForm.id).trim());
-    const newEnrollsToAdd = editForm.enrolledSubjectIds.map(subId => ({ id: `e${Date.now()}_${editForm.id}_${subId}`, studentId: editForm.id, subjectId: subId }));
-    newEnrollments = [...newEnrollments, ...newEnrollsToAdd];
-
-    saveState({ students: updatedStudents, enrollments: newEnrollments });
-    setEditForm(null); 
-    showToast('อัปเดตข้อมูลและรายวิชาสำเร็จ');
-  };
-
-  const toggleSubject = (subId) => {
-     if(editForm.enrolledSubjectIds.includes(subId)) setEditForm({...editForm, enrolledSubjectIds: editForm.enrolledSubjectIds.filter(id => id !== subId)});
-     else setEditForm({...editForm, enrolledSubjectIds: [...editForm.enrolledSubjectIds, subId]});
+  const handleRemove = (id) => {
+     if (filterSub === 'all') {
+        if(confirmAction) {
+          confirmAction('คำเตือน: การลบนี้จะลบนักเรียนออกจาก "ทุกรายวิชา" และออกจากระบบถาวร ยืนยันใช่หรือไม่?', async () => {
+            saveState({
+              students: students.filter(x => String(x.id) !== String(id)),
+              enrollments: enrollments.filter(x => String(x.studentId) !== String(id))
+            }, true);
+            if (dbUrl) {
+               try {
+                 await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'deleteRecord', sheetName: 'students', keyField: 'id', keyValue: String(id) }) });
+                 showToast('ลบนักเรียนออกจากระบบถาวรสำเร็จ');
+               } catch(e){}
+            }
+          });
+        }
+     } else {
+        if(confirmAction) {
+          confirmAction('ต้องการนำนักเรียนคนนี้ออกจากวิชาที่เลือกอยู่ใช่หรือไม่? (ยังอยู่ในระบบและวิชาอื่น)', async () => {
+            const enrollToRemove = enrollments.find(x => String(x.studentId) === String(id) && x.subjectId === filterSub);
+            saveState({
+              enrollments: enrollments.filter(x => !(String(x.studentId) === String(id) && x.subjectId === filterSub))
+            }, true);
+            if (dbUrl && enrollToRemove) {
+               try {
+                 await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'deleteRecord', sheetName: 'enrollments', keyField: 'id', keyValue: String(enrollToRemove.id) }) });
+                 showToast('นำนักเรียนออกจากวิชาเรียบร้อย');
+               } catch(e){}
+            }
+          });
+        }
+     }
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <ConfirmModal isOpen={!!confirmDel} title="ยืนยันการลบนักเรียน" message="คุณต้องการลบนักเรียนคนนี้ใช่หรือไม่? ข้อมูลการเรียน คะแนน และการเข้าเรียนจะถูกลบทั้งหมด" onConfirm={executeDelete} onCancel={() => setConfirmDel(null)} theme={theme} />
-
+    <div className="max-w-6xl mx-auto space-y-6 relative">
       <div className={`rounded-3xl overflow-hidden shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-        <div className={`p-5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+        <div className={`p-5 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 border-b ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
           <h2 className="text-lg font-black flex items-center shrink-0"><Users className="mr-2 text-blue-500" size={20} /> ทะเบียนนักเรียน</h2>
-          <div className="flex gap-2 flex-wrap w-full lg:w-auto">
-            <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกวิชา</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+          <div className="flex gap-2 flex-wrap w-full xl:w-auto items-center">
+            <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">-- ทุกวิชา (ระบบหลัก) --</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
             <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
-            <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} disabled={filterRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s => <option key={s} value={s}>ตอน {s}</option>)}</select>
+            <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={`font-bold rounded-xl p-2.5 outline-none border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}><option value="all">ทุกตอน</option>{dynamicSections.map(s => <option key={s} value={s}>ตอน {s}</option>)}</select>
             
-            <button onClick={handleExportExcel} className={`px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-all`} title="ส่งออก Excel เบอร์โทร"><DownloadCloud size={16} className="inline md:mr-1" /><span className="hidden md:inline"> ส่งออก Excel</span></button>
-            <button onClick={() => {setShowBatchEnroll(!showBatchEnroll); setShowAddSingle(false); setShowImport(false);}} className={`px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all`}><Layers size={16} className="inline md:mr-1"/><span className="hidden md:inline"> ลงทะเบียนทั้งห้อง</span></button>
-            <button onClick={() => {setShowAddSingle(!showAddSingle); setShowBatchEnroll(false); setShowImport(false);}} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold"><User size={16} className="inline md:mr-1" /><span className="hidden md:inline"> เพิ่มทีละคน</span></button>
-            <button onClick={() => {setShowImport(!showImport); setShowAddSingle(false); setShowBatchEnroll(false);}} className={`px-4 py-2.5 rounded-xl font-bold border ${isDark ? 'bg-slate-700 border-slate-600 text-white hover:bg-slate-600' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}><ClipboardPaste size={16} className="inline md:mr-1" /><span className="hidden md:inline"> นำเข้า Excel</span></button>
+            <div className={`h-8 w-px mx-2 hidden xl:block ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}></div>
+
+            {filterSub !== 'all' && (
+               <button onClick={() => {setShowEnrollModal(true); setShowAddSingle(false); setShowImport(false);}} className={`px-4 py-2.5 rounded-xl font-bold border ${isDark ? 'bg-slate-700 border-slate-600 text-white hover:bg-slate-600' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}><UserPlus size={16} className="inline mr-1" /> ดึงนักเรียนเข้าวิชา</button>
+            )}
+            <button onClick={() => {setShowAddSingle(!showAddSingle); setShowImport(false);}} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold"><User size={16} className="inline mr-1" /> เพิ่มรายชื่อใหม่</button>
+            <button onClick={() => {setShowImport(!showImport); setShowAddSingle(false);}} className={`px-4 py-2.5 rounded-xl font-bold border ${isDark ? 'bg-slate-700 border-slate-600 text-white hover:bg-slate-600' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}><ClipboardPaste size={16} className="inline mr-1" /> นำเข้าจาก Excel</button>
           </div>
         </div>
 
-        {showBatchEnroll && (
-          <div className={`p-6 border-b bg-indigo-50/50 dark:bg-indigo-900/10`}>
-             <h4 className="font-bold text-indigo-600 dark:text-indigo-400 mb-3 flex items-center"><Layers size={18} className="mr-2"/> ผูกรายชื่อนักเรียนทั้งห้องเข้ากับวิชา</h4>
-             <div className="flex flex-col sm:flex-row gap-4 mb-4">
-               <select value={batchSub} onChange={e => setBatchSub(e.target.value)} className={inputClass}><option value="" disabled>เลือกวิชา...</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-               <select value={batchRoom} onChange={e => setBatchRoom(e.target.value)} className={inputClass}><option value="" disabled>เลือกห้องเรียน...</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
-             </div>
-             <div className="text-right"><button onClick={handleBatchEnrollSubmit} className="px-8 py-2.5 bg-indigo-600 text-white rounded-xl font-bold shadow-md hover:bg-indigo-700">บันทึกลงทะเบียน</button></div>
-          </div>
+        {filterSub === 'all' && (
+           <div className={`px-5 py-3 text-sm font-bold border-b ${isDark ? 'bg-amber-900/20 text-amber-500 border-slate-700' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
+              <AlertCircle size={16} className="inline mr-2 -mt-1"/> ตอนนี้คุณกำลังดู "นักเรียนทั้งหมดในระบบ" หากต้องการดึงรายชื่อเข้าวิชา กรุณาเลือกวิชาจาก Dropdown ด้านบน
+           </div>
         )}
 
         {showAddSingle && (
           <form onSubmit={handleAddSingle} className={`p-6 border-b grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-             <div className="md:col-span-3 font-bold text-blue-500 mb-2">เพิ่มนักเรียนใหม่ (ทีละคน)</div>
-             <div><label className="block text-xs font-bold mb-1">รหัสประจำตัว *</label><input required value={singleStu.id || ''} onChange={e=>setSingleStu({...singleStu, id: e.target.value})} className={inputClass} placeholder="รหัส" /></div>
-             <div><label className="block text-xs font-bold mb-1">ชื่อ-นามสกุล *</label><input required value={singleStu.name || ''} onChange={e=>setSingleStu({...singleStu, name: e.target.value})} className={inputClass} placeholder="ชื่อสกุล" /></div>
-             <div><label className="block text-xs font-bold mb-1">ห้อง (เช่น 1/1) *</label><input required value={singleStu.room || ''} onChange={e=>setSingleStu({...singleStu, room: e.target.value})} className={inputClass} placeholder="ห้อง" /></div>
-             <div><label className="block text-xs font-bold mb-1">เลขที่</label><input value={singleStu.number || ''} onChange={e=>setSingleStu({...singleStu, number: e.target.value})} className={inputClass} placeholder="เลขที่" /></div>
-             <div><label className="block text-xs font-bold mb-1">ตอน</label><input value={singleStu.section || ''} onChange={e=>setSingleStu({...singleStu, section: e.target.value})} className={inputClass} placeholder="ก/ข (ไม่บังคับ)" /></div>
+             <div className="md:col-span-3">
+               <div className="font-bold text-blue-500 mb-1">เพิ่มนักเรียนเข้าชั้นเรียน (ทีละคน)</div>
+               <div className="text-xs text-slate-500 mb-3">* หากใส่รหัสเดิมของนักเรียนที่มีอยู่แล้ว ระบบจะแค่เพิ่มรายชื่อเข้าวิชาที่เลือกให้ โดยไม่แก้ชื่อซ้ำ ระบบจะซิงค์กับ Sheet อัตโนมัติ</div>
+             </div>
+             <div><label className="block text-xs font-bold mb-1">รหัสประจำตัว *</label><input required value={singleStu.id} onChange={e=>setSingleStu({...singleStu, id: e.target.value})} className={inputClass} placeholder="รหัส" /></div>
+             <div><label className="block text-xs font-bold mb-1">ชื่อ-นามสกุล *</label><input required value={singleStu.name} onChange={e=>setSingleStu({...singleStu, name: e.target.value})} className={inputClass} placeholder="ชื่อสกุล" /></div>
+             <div><label className="block text-xs font-bold mb-1">ห้อง (เช่น 1/1) *</label><input required value={singleStu.room} onChange={e=>setSingleStu({...singleStu, room: e.target.value})} className={inputClass} placeholder="ห้อง" /></div>
+             <div><label className="block text-xs font-bold mb-1">ตอน</label><input value={singleStu.section} onChange={e=>setSingleStu({...singleStu, section: e.target.value})} className={inputClass} placeholder="ก/ข (ไม่บังคับ)" /></div>
+             <div><label className="block text-xs font-bold mb-1">เลขที่</label><input value={singleStu.number} onChange={e=>setSingleStu({...singleStu, number: e.target.value})} className={inputClass} placeholder="เลขที่" /></div>
              <div><label className="block text-xs font-bold mb-1">ลงทะเบียนวิชา</label><select value={singleStu.subjectId} onChange={e=>setSingleStu({...singleStu, subjectId: e.target.value})} className={inputClass}><option value="">ไม่ลงทะเบียนตอนนี้</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-             <div className="md:col-span-3 text-right"><button type="submit" className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold shadow-md">บันทึกข้อมูล</button></div>
+             <div className="md:col-span-3 text-right"><button type="submit" className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold shadow-md">บันทึก & ซิงค์ข้อมูล</button></div>
           </form>
         )}
 
         {showImport && (
           <div className={`p-6 border-b ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+             <div className="font-bold text-blue-500 mb-1">นำเข้ารายชื่อนักเรียน (Excel)</div>
+             <div className="text-xs text-slate-500 mb-4">* ระบบจะซิงค์ข้อมูลกับ Sheet ทันที ถ้านักเรียนเคยมีรหัสอยู่ในระบบแล้ว จะไม่มีการสร้างชื่อซ้ำ</div>
              <select value={importSub} onChange={e => setImportSub(e.target.value)} className={`mb-3 w-full sm:w-1/2 p-3 rounded-xl border font-bold outline-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-300'}`}><option value="" disabled>เลือกวิชาที่จะให้ลงทะเบียน...</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
              <p className={`text-xs mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>คัดลอก Excel 5 คอลัมน์มาวาง: รหัส | ชื่อ-สกุล | เลขที่ | ตอน | ห้อง</p>
              <textarea value={pasteData} onChange={e => setPasteData(e.target.value)} className={`w-full h-32 p-4 rounded-xl border outline-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-300'}`} placeholder="1001&#9;เด็กชายสมชาย ใจดี&#9;1&#9;ก&#9;1/1" />
-             <div className="mt-3 text-right"><button onClick={handleBulkImport} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold">บันทึก นำเข้า</button></div>
+             <div className="mt-3 text-right"><button onClick={handleBulkImport} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold">บันทึก & นำเข้า</button></div>
           </div>
         )}
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm min-w-[700px]">
+          <table className="w-full text-left text-sm min-w-[800px]">
             <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-              <tr><th className="p-4 text-center">รูป</th><th className="p-4">รหัส</th><th className="p-4">ชื่อ-สกุล</th><th className="p-4">เลขที่/ห้อง</th><th className="p-4 text-center">ใช้งานล่าสุด</th><th className="p-4 text-center">จัดการ</th></tr>
+              <tr>
+                 <th className="p-4 text-center">รูป</th>
+                 <th className="p-4">รหัส</th>
+                 <th className="p-4">ชื่อ-สกุล</th>
+                 <th className="p-4">ห้อง / ตอน / เลขที่</th>
+                 <th className="p-4">เบอร์ติดต่อ</th>
+                 <th className="p-4 text-center">จัดการ</th>
+              </tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {targetStudents.map(s => (
-                <tr key={s.id} onClick={() => setViewingStudent(s)} className={`transition-colors cursor-pointer ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/50'}`}>
+                <tr key={s.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/50'}`}>
                   <td className="p-4 text-center"><div className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto overflow-hidden border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
                     {s.profileImg ? <img src={getValidImgUrl(s.profileImg)} className="w-full h-full object-cover rounded-full"/> : <User size={18}/>}
                   </div></td>
                   <td className="p-4 font-mono font-bold text-blue-500">{s.id}</td>
                   <td className="p-4 font-bold">{s.name}</td>
-                  <td className="p-4 font-medium">{s.number} / {s.room} <span className="opacity-50 ml-1 text-xs">{s.section}</span></td>
-                  <td className={`p-4 text-center text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{s.lastLogin ? s.lastLogin : '-'}</td>
+                  <td className="p-4 font-medium">ห้อง {s.room} / ตอน {s.section || '-'} / เลขที่ {s.number}</td>
+                  <td className="p-4">
+                     <div className="text-xs font-bold text-slate-500">นร: <span className="text-blue-500">{s.studentPhone || '-'}</span></div>
+                     <div className="text-xs font-bold text-slate-500">ผปค: <span className="text-emerald-500">{s.parentPhone || '-'}</span></div>
+                  </td>
                   <td className="p-4 text-center">
-                    <button onClick={(e) => openEdit(e, s)} className="text-amber-500 hover:text-amber-600 mr-3" title="แก้ไขข้อมูล/ลงทะเบียนวิชา"><Edit size={16}/></button>
-                    <button onClick={(e) => { e.stopPropagation(); setConfirmDel(s.id); }} className="text-red-400 hover:text-red-500" title="ลบนักเรียน"><Trash2 size={16}/></button>
+                    <button onClick={() => handleRemove(s.id)} className="text-red-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors" title={filterSub === 'all' ? "ลบออกจากระบบ (ทุกวิชา)" : "นำรายชื่อออกจากวิชานี้"}><Trash2 size={16}/></button>
                   </td>
                 </tr>
               ))}
-              {targetStudents.length === 0 && <tr><td colSpan="6" className="text-center p-8 text-slate-500 font-bold">ไม่พบรายชื่อนักเรียน</td></tr>}
+              {targetStudents.length === 0 && <tr><td colSpan="6" className="text-center p-8 text-slate-500 font-bold">ไม่พบรายชื่อนักเรียนในเงื่อนไขนี้</td></tr>}
             </tbody>
           </table>
         </div>
       </div>
 
-      {viewingStudent && (
-         <ViewStudentModal 
-            student={viewingStudent} 
-            onClose={() => setViewingStudent(null)} 
-            students={students} 
-            setStudents={setStudents}
-            assignments={assignments}
-            submissions={submissions}
-            behaviors={behaviors}
-            enrollments={enrollments}
-            saveState={saveState}
-            showToast={showToast}
-            theme={theme}
-         />
-      )}
-
-      {editForm && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className={`rounded-3xl w-full max-w-lg p-8 shadow-2xl relative border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <button onClick={() => setEditForm(null)} className={`absolute top-5 right-5 p-2 rounded-full ${isDark ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'} transition-colors`}><X size={20}/></button>
-            <h3 className="text-xl font-black mb-4 flex items-center"><Edit className="mr-2 text-blue-500"/> แก้ไขและลงทะเบียนวิชา</h3>
-            
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold mb-1">รหัสประจำตัว</label><input disabled value={editForm.id || ''} className={`${inputClass} opacity-50 cursor-not-allowed`} /></div>
-                <div><label className="block text-xs font-bold mb-1">ชื่อ-สกุล</label><input required value={editForm.name || ''} onChange={e=>setEditForm({...editForm, name: e.target.value})} className={inputClass} /></div>
-                <div><label className="block text-xs font-bold mb-1">ห้อง</label><input required value={editForm.room || ''} onChange={e=>setEditForm({...editForm, room: e.target.value})} className={inputClass} /></div>
-                <div><label className="block text-xs font-bold mb-1">เลขที่</label><input value={editForm.number || ''} onChange={e=>setEditForm({...editForm, number: e.target.value})} className={inputClass} /></div>
-                <div className="col-span-2"><label className="block text-xs font-bold mb-1">ตอน (Group / Section)</label><input value={editForm.section || ''} onChange={e=>setEditForm({...editForm, section: e.target.value})} className={inputClass} placeholder="เช่น ก หรือ ข (ไม่บังคับ)" /></div>
-              </div>
-
-              <div className={`p-4 rounded-xl mt-4 border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                <label className="block text-sm font-bold mb-3 text-blue-500 flex items-center"><Layers size={16} className="mr-2"/> เลือกวิชาที่ต้องการลงทะเบียนเรียน</label>
-                <div className="max-h-40 overflow-y-auto space-y-2 custom-scrollbar pr-2">
-                  {subjects.map(sub => (
-                    <label key={sub.id} className={`flex items-center p-3 rounded-lg cursor-pointer border transition-all ${editForm.enrolledSubjectIds.includes(sub.id) ? (isDark ? 'bg-blue-900/30 border-blue-500/50' : 'bg-blue-50 border-blue-200') : (isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200')}`}>
-                      <input type="checkbox" checked={editForm.enrolledSubjectIds.includes(sub.id)} onChange={() => toggleSubject(sub.id)} className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500 mr-3" />
-                      <span className="font-bold text-sm">{sub.name} <span className="opacity-50 text-xs ml-1">({sub.code})</span></span>
-                    </label>
-                  ))}
-                  {subjects.length === 0 && <div className="text-xs text-slate-500 font-bold">ยังไม่มีรายวิชาในระบบ</div>}
-                </div>
-              </div>
-              <div className="pt-4 flex justify-end"><button type="submit" className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md w-full">บันทึกการแก้ไข</button></div>
-            </form>
-          </div>
-        </div>
+      {showEnrollModal && (
+         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
+           <div className={`rounded-3xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl relative border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+             <div className="p-6 border-b flex justify-between items-center shrink-0">
+                <h3 className="text-xl font-black">ดึงนักเรียนเข้ารายวิชานี้</h3>
+                <button onClick={() => setShowEnrollModal(false)} className={`p-2 rounded-full ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-slate-100 text-slate-500'}`}><X size={20}/></button>
+             </div>
+             <div className="p-4 overflow-y-auto custom-scrollbar flex-1">
+                <p className={`text-sm mb-4 font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>เลือกรายชื่อนักเรียนที่ยังไม่อยู่ในวิชานี้ เพื่อดึงเข้าห้องเรียน</p>
+                {notEnrolledStudents.length === 0 ? (
+                   <div className="text-center py-10 text-slate-400 font-bold">ไม่มีนักเรียนเหลือให้ดึงเพิ่มแล้ว (ทุกคนอยู่ในวิชานี้หมดแล้ว)</div>
+                ) : (
+                   <div className="space-y-2">
+                     <label className={`flex items-center p-3 rounded-xl font-bold cursor-pointer transition-colors ${isDark ? 'bg-slate-700/50 hover:bg-slate-700' : 'bg-slate-50 hover:bg-slate-100'}`}>
+                       <input type="checkbox" checked={enrollSelections.length === notEnrolledStudents.length} onChange={(e) => setEnrollSelections(e.target.checked ? notEnrolledStudents.map(s=>s.id) : [])} className="w-4 h-4 mr-3" />
+                       เลือกทั้งหมด
+                     </label>
+                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                       {notEnrolledStudents.map(s => (
+                          <label key={s.id} className={`flex items-center p-3 rounded-xl border cursor-pointer transition-colors ${isDark ? 'border-slate-700 hover:bg-slate-700/50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                            <input type="checkbox" checked={enrollSelections.includes(s.id)} onChange={(e) => {
+                               if (e.target.checked) setEnrollSelections([...enrollSelections, s.id]);
+                               else setEnrollSelections(enrollSelections.filter(id => id !== s.id));
+                            }} className="w-4 h-4 mr-3" />
+                            <div className="text-sm">
+                               <div className="font-bold">{s.name}</div>
+                               <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>รหัส {s.id} | ห้อง {s.room}</div>
+                            </div>
+                          </label>
+                       ))}
+                     </div>
+                   </div>
+                )}
+             </div>
+             <div className={`p-4 border-t flex justify-end shrink-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                <button onClick={handleEnrollSelected} disabled={enrollSelections.length === 0} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold disabled:opacity-50 shadow-md">ดึงนักเรียน ({enrollSelections.length}) เข้าวิชา</button>
+             </div>
+           </div>
+         </div>
       )}
     </div>
   );
 }
 
-function ViewStudentModal({ student, onClose, students, setStudents, assignments, submissions, behaviors, enrollments, saveState, showToast, theme }) {
-  const isDark = theme === 'dark';
-  const inputClass = `w-full rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
-
-  const [contactForm, setContactForm] = useState({
-     studentPhone: student.studentPhone || '',
-     parentPhone: student.parentPhone || '',
-     parentRelation: student.parentRelation || ''
-  });
-
-  const totalBehaviors = behaviors.filter(b => String(b.studentId).trim() === String(student.id).trim()).reduce((sum, b) => sum + getSafeNum(b.points, 0), 0);
-  
-  // คำนวณงานค้างส่งเฉพาะวิชาที่นักเรียนลงทะเบียนเรียน
-  const enrolledSubjectIds = (enrollments || []).filter(e => String(e.studentId).trim() === String(student.id).trim()).map(e => e.subjectId);
-  const availableAsgs = assignments.filter(a => 
-     enrolledSubjectIds.includes(a.subjectId) && 
-     (a.targetRoom === 'all' || String(a.targetRoom).trim() === String(student.room).trim())
-  );
-  const missingCount = availableAsgs.filter(a => !submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim())).length;
-
-  const handleSaveContact = (e) => {
-     e.preventDefault();
-     const updatedStudents = students.map(s => String(s.id).trim() === String(student.id).trim() ? { ...s, ...contactForm } : s);
-     saveState({ students: updatedStudents });
-     showToast('บันทึกข้อมูลติดต่อสำเร็จ');
-  };
-
-  return (
-    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in" onClick={onClose}>
-      <div className={`rounded-3xl w-full max-w-2xl shadow-2xl relative border flex flex-col max-h-[90vh] overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`} onClick={e => e.stopPropagation()}>
-         
-         <div className={`p-6 border-b flex justify-between items-center bg-gradient-to-r ${isDark ? 'from-blue-900/50 to-slate-800 border-slate-700' : 'from-blue-50 to-white border-slate-200'}`}>
-            <div className="flex items-center gap-4">
-               <div className="w-16 h-16 rounded-full border-2 border-white shadow-md overflow-hidden bg-white shrink-0">
-                  {student.profileImg ? <img src={getValidImgUrl(student.profileImg)} className="w-full h-full object-cover" /> : <User size={32} className="w-full h-full p-2 text-slate-400" />}
-               </div>
-               <div>
-                 <h2 className="text-xl font-black">{student.name}</h2>
-                 <div className="flex gap-2 text-sm font-bold mt-1">
-                    <span className="text-blue-500 font-mono">{student.id}</span>
-                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>| ห้อง {student.room} | เลขที่ {student.number}</span>
-                 </div>
-               </div>
-            </div>
-            <button onClick={onClose} className={`p-2 rounded-full transition-colors shrink-0 ${isDark ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'}`}><X size={20}/></button>
-         </div>
-
-         <div className="p-6 overflow-y-auto custom-scrollbar space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-               <div className={`p-4 rounded-2xl border text-center ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                  <p className="text-xs font-bold text-slate-500 mb-1">งานค้างส่ง (ทั้งหมด)</p>
-                  <p className={`text-3xl font-black ${missingCount > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{missingCount}</p>
-               </div>
-               <div className={`p-4 rounded-2xl border text-center ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                  <p className="text-xs font-bold text-slate-500 mb-1">คะแนนพฤติกรรมสะสม</p>
-                  <p className={`text-3xl font-black ${totalBehaviors > 0 ? 'text-emerald-500' : totalBehaviors < 0 ? 'text-red-500' : 'text-blue-500'}`}>{totalBehaviors > 0 ? `+${totalBehaviors}` : totalBehaviors}</p>
-               </div>
-            </div>
-
-            <form onSubmit={handleSaveContact} className={`p-5 rounded-2xl border ${isDark ? 'bg-slate-900/30 border-slate-700' : 'bg-white border-slate-200'}`}>
-               <h3 className="font-bold text-blue-500 mb-4 flex items-center"><User size={16} className="mr-2"/> ข้อมูลการติดต่อ</h3>
-               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div><label className="block text-xs font-bold mb-1">เบอร์โทรศัพท์นักเรียน</label><input type="text" value={contactForm.studentPhone} onChange={e=>setContactForm({...contactForm, studentPhone: e.target.value})} className={inputClass} placeholder="08x-xxx-xxxx" /></div>
-                  <div><label className="block text-xs font-bold mb-1">เบอร์โทรศัพท์ผู้ปกครอง</label><input type="text" value={contactForm.parentPhone} onChange={e=>setContactForm({...contactForm, parentPhone: e.target.value})} className={inputClass} placeholder="08x-xxx-xxxx" /></div>
-                  <div className="sm:col-span-2"><label className="block text-xs font-bold mb-1">ความสัมพันธ์ผู้ปกครอง (เช่น บิดา, มารดา)</label><input type="text" value={contactForm.parentRelation} onChange={e=>setContactForm({...contactForm, parentRelation: e.target.value})} className={inputClass} /></div>
-               </div>
-               <div className="mt-4 text-right"><button type="submit" className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-sm shadow-sm">บันทึกข้อมูลติดต่อ</button></div>
-            </form>
-         </div>
-      </div>
-    </div>
-  );
-}
-
-
-function TeacherAttendance({ subjects, students, enrollments, attendance, setAttendance, showToast, theme, getUniqueRooms, getUniqueSections }) {
+function TeacherAttendance({ subjects, students, enrollments, attendance, saveState, showToast, theme }) {
   const [selectedSub, setSelectedSub] = useState(subjects[0]?.id || '');
   const [selectedRoom, setSelectedRoom] = useState('all');
   const [selectedSection, setSelectedSection] = useState('all');
@@ -1153,24 +1099,24 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
   const [tempStatus, setTempStatus] = useState({});
   const isDark = theme === 'dark';
 
-  const enrolledIds = enrollments.filter(e => e.subjectId === selectedSub).map(e => String(e.studentId).trim());
-  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = getUniqueRooms();
-  const dynamicSections = getUniqueSections(selectedRoom);
+  const enrolledIds = enrollments.filter(e => e.subjectId === selectedSub).map(e => String(e.studentId));
+  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id)));
+  const dynamicRooms = [...new Set(enrolledSts.map(s => s.room))].filter(Boolean).sort();
+  const dynamicSections = [...new Set(enrolledSts.filter(s => selectedRoom === 'all' || String(s.room) === String(selectedRoom)).map(s => String(s.section || '')))].filter(s => s && s !== '-').sort();
   
-  const targetStudents = enrolledSts
-       .filter(s => selectedRoom === 'all' || String(s.room || '').trim() === String(selectedRoom).trim())
-       .filter(s => selectedSection === 'all' || String(s.section || '').trim() === String(selectedSection).trim());
+  const targetStudents = enrolledSts.filter(s => 
+    (selectedRoom === 'all' || String(s.room) === String(selectedRoom)) &&
+    (selectedSection === 'all' || String(s.section || '') === String(selectedSection))
+  );
 
   useEffect(() => {
     let initialStatus = {};
     targetStudents.forEach(s => {
-      // แก้ไขการเปรียบเทียบรหัสให้เป็น String เสมอ
-      const existingRecord = attendance.find(a => String(a.studentId).trim() === String(s.id).trim() && String(a.subjectId).trim() === String(selectedSub).trim() && String(a.date).trim() === String(date).trim());
+      const existingRecord = attendance.find(a => String(a.studentId) === String(s.id) && a.subjectId === selectedSub && a.date === date);
       initialStatus[s.id] = existingRecord ? existingRecord.status : 'present';
     });
     setTempStatus(initialStatus);
-  }, [selectedSub, date, targetStudents.length]); 
+  }, [selectedSub, date, targetStudents.length]);
 
   const handleStatusChange = (studentId, status) => { setTempStatus({ ...tempStatus, [studentId]: status }); };
 
@@ -1180,15 +1126,20 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
 
     targetStudents.forEach(s => {
       const status = tempStatus[s.id] || 'present';
-      const existingIndex = newAttendance.findIndex(a => String(a.studentId).trim() === String(s.id).trim() && String(a.subjectId).trim() === String(selectedSub).trim() && String(a.date).trim() === String(date).trim());
+      const existingIndex = newAttendance.findIndex(a => String(a.studentId) === String(s.id) && a.subjectId === selectedSub && a.date === date);
+
       if (existingIndex >= 0) {
-        if (newAttendance[existingIndex].status !== status) { newAttendance[existingIndex].status = status; changesMade = true; }
+        if (newAttendance[existingIndex].status !== status) {
+           newAttendance[existingIndex] = { ...newAttendance[existingIndex], status };
+           changesMade = true;
+        }
       } else {
-        newAttendance.push({ id: `at${Date.now()}_${s.id}_${Math.random()}`, subjectId: selectedSub, studentId: s.id, date, status }); changesMade = true;
+        newAttendance.push({ id: `at${Date.now()}_${s.id}_${Math.random()}`, subjectId: selectedSub, studentId: String(s.id), date, status });
+        changesMade = true;
       }
     });
 
-    if (changesMade) { setAttendance(newAttendance); showToast('บันทึกข้อมูลการเข้าเรียนสำเร็จ'); } 
+    if (changesMade) { saveState({ attendance: newAttendance }); showToast('บันทึกและซิงค์ข้อมูลการเข้าเรียนสำเร็จ'); } 
     else { showToast('ไม่มีการเปลี่ยนแปลงข้อมูล'); }
   };
 
@@ -1204,16 +1155,16 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
       <div className={`p-6 rounded-3xl flex flex-wrap gap-4 items-end shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={selectedSub} onChange={e=>{setSelectedSub(e.target.value); setSelectedRoom('all'); setSelectedSection('all');}} className={inputClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
         <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={selectedRoom} onChange={e=>{setSelectedRoom(e.target.value); setSelectedSection('all');}} className={inputClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
-        <div><label className="block text-sm font-bold mb-2">ตอน (Section)</label><select value={selectedSection} onChange={e=>setSelectedSection(e.target.value)} className={inputClass} disabled={selectedRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={selectedSection} onChange={e=>setSelectedSection(e.target.value)} className={inputClass}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
         <div><label className="block text-sm font-bold mb-2">วันที่</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} className={inputClass} /></div>
       </div>
 
       <div className={`rounded-3xl overflow-hidden shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className={`p-4 text-sm font-bold border-b flex items-center ${isDark ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800' : 'bg-emerald-50 text-emerald-800 border-emerald-100'}`}>
-          <AlertCircle size={16} className="mr-2 shrink-0"/> <span className="leading-tight">ระบบตั้งค่า "มาเรียน" ให้ทุกคนอัตโนมัติ แก้ไขสถานะให้เสร็จก่อน แล้วจึงกด "บันทึกการเข้าเรียน" ด้านบน</span>
+          <AlertCircle size={16} className="mr-2"/> ระบบตั้งค่า "มาเรียน" ให้ทุกคนอัตโนมัติ แก้ไขสถานะให้เสร็จก่อน แล้วจึงกด "บันทึกการเข้าเรียน" ด้านบน
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm min-w-[600px]">
+          <table className="w-full text-left text-sm min-w-[700px]">
             <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
               <tr><th className="p-4 w-16 text-center">ห้อง</th><th className="p-4 w-16 text-center">ตอน</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">สถานะการมาเรียน</th></tr>
             </thead>
@@ -1243,25 +1194,28 @@ function TeacherAttendance({ subjects, students, enrollments, attendance, setAtt
   );
 }
 
-function TeacherAttendanceSummary({ subjects, students, enrollments, attendance, theme, showToast, getUniqueRooms, getUniqueSections }) {
+function TeacherAttendanceSummary({ subjects, students, enrollments, attendance, theme }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSection, setFilterSection] = useState('all');
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7)); 
   const isDark = theme === 'dark';
 
-  const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
-  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = getUniqueRooms();
-  const dynamicSections = getUniqueSections(filterRoom);
+  const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId));
+  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id)));
+  const dynamicRooms = [...new Set(enrolledSts.map(s => s.room))].filter(Boolean).sort();
+  const dynamicSections = [...new Set(enrolledSts.filter(s => filterRoom === 'all' || String(s.room) === String(filterRoom)).map(s => String(s.section || '')))].filter(s => s && s !== '-').sort();
   
-  const targetStudents = enrolledSts
-      .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
-      .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
+  const targetStudents = enrolledSts.filter(s => 
+    (filterRoom === 'all' || String(s.room) === String(filterRoom)) &&
+    (filterSection === 'all' || String(s.section || '') === String(filterSection))
+  );
 
-  const subObj = subjects.find(s => s.id === filterSub);
-
-  const allDatesInMonth = [...new Set(attendance.filter(a => a.subjectId === filterSub && a.date.startsWith(filterMonth)).map(a => a.date))].sort();
+  const allDatesInMonth = [...new Set(
+    attendance
+      .filter(a => a.subjectId === filterSub && a.date.startsWith(filterMonth))
+      .map(a => a.date)
+  )].sort();
 
   const getStatusText = (status) => {
     switch(status) {
@@ -1273,45 +1227,17 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
     }
   };
 
-  const handleExportAttendance = () => {
-    if (!subObj) return;
-    let csv = '\uFEFF'; 
-    csv += `สรุปการเข้าเรียน วิชา ${subObj.name} (${subObj.code}) - เดือน ${filterMonth}\n`;
-    csv += 'ห้อง,ตอน,เลขที่,รหัส,ชื่อ-สกุล,';
-    allDatesInMonth.forEach(d => csv += `"${d.split('-')[2]}/${d.split('-')[1]}",`);
-    csv += 'มา (ครั้ง),สาย (ครั้ง),ลา (ครั้ง),ขาด (ครั้ง)\n';
-
-    targetStudents.forEach(stu => {
-      let counts = { present: 0, late: 0, leave: 0, absent: 0 };
-      csv += `="${stu.room}","${stu.section || ''}",${stu.number},="${stu.id}","${stu.name}",`;
-      
-      allDatesInMonth.forEach(date => {
-        const record = attendance.find(a => String(a.studentId).trim() === String(stu.id).trim() && String(a.subjectId).trim() === String(filterSub).trim() && String(a.date).trim() === String(date).trim());
-        if (record) counts[record.status]++;
-        const statusTxt = record ? (record.status === 'present' ? 'ม' : record.status === 'late' ? 'ส' : record.status === 'leave' ? 'ล' : 'ข') : '-';
-        csv += `${statusTxt},`;
-      });
-      csv += `${counts.present},${counts.late},${counts.leave},${counts.absent}\n`;
-    });
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = `Attendance_${subObj.code}_${filterMonth}.csv`; link.click();
-    showToast('ดาวน์โหลดรายงานเช็กชื่อ Excel (.csv) สำเร็จ');
-  };
-
   const selectClass = `font-bold rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 border flex-1 md:flex-none ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
 
   return (
     <div className="max-w-full mx-auto space-y-6 flex flex-col h-[calc(100vh-100px)]">
-      <div className={`p-5 rounded-3xl flex flex-wrap gap-4 items-center justify-between shadow-sm shrink-0 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-         <div className="flex gap-4 w-full md:w-auto items-end flex-wrap">
-           <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={filterSub} onChange={e=>{setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={`w-full ${selectClass}`}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-           <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={filterRoom} onChange={e=>{setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
-           <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={filterSection} onChange={e=>setFilterSection(e.target.value)} className={selectClass} disabled={filterRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
-           <div><label className="block text-sm font-bold mb-2">เดือน</label><input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className={selectClass} /></div>
-         </div>
-         <button onClick={handleExportAttendance} className="flex items-center px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md w-full md:w-auto justify-center transition-colors"><DownloadCloud size={18} className="mr-2" /> ส่งออก Excel</button>
+      <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3 shrink-0"><ClipboardCheck className="mr-2 text-blue-500"/> สรุปผลการเข้าเรียน</h2>
+      
+      <div className={`p-5 rounded-3xl flex flex-wrap gap-4 items-end shadow-sm shrink-0 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={filterSub} onChange={e=>{setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={`w-full ${selectClass}`}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={filterRoom} onChange={e=>{setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={filterSection} onChange={e=>setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">เดือนที่ต้องการดู</label><input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className={selectClass} /></div>
       </div>
 
       <div className={`border rounded-3xl overflow-hidden flex-1 flex flex-col shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -1319,9 +1245,19 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
           <table className="w-full text-left text-sm min-w-max border-collapse">
             <thead className={`font-bold sticky top-0 z-10 border-b shadow-sm ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
               <tr>
-                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ห้อง</th><th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ตอน</th><th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>เลขที่</th><th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รหัส / ชื่อ-สกุล</th>
-                {allDatesInMonth.map(d => (<th key={d} className={`p-2 text-center border-r text-xs whitespace-nowrap ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`}>{d.split('-')[2]}/{d.split('-')[1]}</th>))}
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ห้อง</th>
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ตอน</th>
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>เลขที่</th>
+                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รหัส / ชื่อ-สกุล</th>
+                
+                {allDatesInMonth.map(d => (
+                  <th key={d} className={`p-2 text-center border-r text-xs whitespace-nowrap ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`}>
+                    {d.split('-')[2]}/{d.split('-')[1]}
+                  </th>
+                ))}
+                
                 {allDatesInMonth.length === 0 && <th className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ไม่มีข้อมูลในเดือนนี้</th>}
+                
                 <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-green-900/20 text-green-400' : 'border-slate-200 bg-green-50 text-green-700'}`}>มา</th>
                 <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-amber-900/20 text-amber-400' : 'border-slate-200 bg-amber-50 text-amber-700'}`}>สาย</th>
                 <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-blue-900/20 text-blue-400' : 'border-slate-200 bg-blue-50 text-blue-700'}`}>ลา</th>
@@ -1331,19 +1267,26 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {targetStudents.map(stu => {
                 let counts = { present: 0, late: 0, leave: 0, absent: 0 };
+                
                 return (
                   <tr key={stu.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/40'}`}>
                     <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.room}</td>
                     <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.section || '-'}</td>
                     <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{stu.number}</td>
                     <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><span className="text-blue-500 mr-2 font-mono">{stu.id}</span>{stu.name}</td>
+                    
                     {allDatesInMonth.map(date => {
-                      const record = attendance.find(a => String(a.studentId).trim() === String(stu.id).trim() && String(a.subjectId).trim() === String(filterSub).trim() && String(a.date).trim() === String(date).trim());
+                      const record = attendance.find(a => String(a.studentId) === String(stu.id) && a.subjectId === filterSub && a.date === date);
                       if (record) counts[record.status]++;
                       const statusInfo = getStatusText(record?.status);
-                      return (<td key={date} className={`p-2 text-center font-black border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{record ? <span className={`w-8 h-8 flex items-center justify-center rounded-lg mx-auto ${statusInfo.color}`}>{statusInfo.text}</span> : <span className="text-slate-400">-</span>}</td>);
+                      return (
+                        <td key={date} className={`p-2 text-center font-black border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                          {record ? <span className={`w-8 h-8 flex items-center justify-center rounded-lg mx-auto ${statusInfo.color}`}>{statusInfo.text}</span> : <span className="text-slate-400">-</span>}
+                        </td>
+                      );
                     })}
                     {allDatesInMonth.length === 0 && <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>-</td>}
+
                     <td className={`p-4 text-center font-black border-r ${isDark ? 'border-slate-700 text-green-400' : 'border-slate-100 text-green-600'}`}>{counts.present > 0 ? counts.present : '-'}</td>
                     <td className={`p-4 text-center font-black border-r ${isDark ? 'border-slate-700 text-amber-400' : 'border-slate-100 text-amber-600'}`}>{counts.late > 0 ? counts.late : '-'}</td>
                     <td className={`p-4 text-center font-black border-r ${isDark ? 'border-slate-700 text-blue-400' : 'border-slate-100 text-blue-600'}`}>{counts.leave > 0 ? counts.leave : '-'}</td>
@@ -1351,7 +1294,7 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
                   </tr>
                 );
               })}
-              {targetStudents.length === 0 && <tr><td colSpan={8 + allDatesInMonth.length} className="p-8 text-center font-bold text-slate-500">ไม่พบนักเรียนในวิชาและห้องที่เลือก</td></tr>}
+              {targetStudents.length === 0 && <tr><td colSpan={7 + allDatesInMonth.length} className="p-8 text-center font-bold text-slate-500">ไม่พบนักเรียนในวิชาและห้องที่เลือก</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1360,22 +1303,22 @@ function TeacherAttendanceSummary({ subjects, students, enrollments, attendance,
   );
 }
 
-function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehaviors, showToast, theme, getUniqueRooms, getUniqueSections }) {
+function TeacherBehavior({ subjects, students, enrollments, behaviors, saveState, showToast, theme }) {
   const [selectedSub, setSelectedSub] = useState(subjects[0]?.id || '');
   const [selectedRoom, setSelectedRoom] = useState('all');
   const [selectedSection, setSelectedSection] = useState('all');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const isDark = theme === 'dark';
 
-  const enrolledIds = enrollments.filter(e => e.subjectId === selectedSub).map(e => String(e.studentId).trim());
-  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = getUniqueRooms();
-  const dynamicSections = getUniqueSections(selectedRoom);
+  const enrolledIds = enrollments.filter(e => e.subjectId === selectedSub).map(e => String(e.studentId));
+  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id)));
+  const dynamicRooms = [...new Set(enrolledSts.map(s => s.room))].filter(Boolean).sort();
+  const dynamicSections = [...new Set(enrolledSts.filter(s => selectedRoom === 'all' || String(s.room) === String(selectedRoom)).map(s => String(s.section || '')))].filter(s => s && s !== '-').sort();
   
-  const targetStudents = enrolledSts
-       .filter(s => selectedRoom === 'all' || String(s.room || '').trim() === String(selectedRoom).trim())
-       .filter(s => selectedSection === 'all' || String(s.section || '').trim() === String(selectedSection).trim());
-
+  const targetStudents = enrolledSts.filter(s => 
+    (selectedRoom === 'all' || String(s.room) === String(selectedRoom)) &&
+    (selectedSection === 'all' || String(s.section || '') === String(selectedSection))
+  );
 
   const handleSaveBehavior = (studentId) => {
     const ptsInput = document.getElementById(`beh-pts-${studentId}`);
@@ -1383,11 +1326,14 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
     const pts = parseFloat(ptsInput.value);
     const rem = remInput.value.trim();
 
-    if (isNaN(pts) || !rem) return showToast('กรุณากรอกคะแนนพฤติกรรม (เป็นตัวเลข) และพิมพ์หมายเหตุให้ครบถ้วน');
+    if (isNaN(pts) || !rem) {
+      return showToast('กรุณากรอกคะแนนพฤติกรรม (เป็นตัวเลข) และพิมพ์หมายเหตุให้ครบถ้วน');
+    }
 
-    setBehaviors([...behaviors, { id: `b${Date.now()}_${Math.random()}`, subjectId: selectedSub, studentId: String(studentId).trim(), date, points: pts, remark: rem }]);
-    ptsInput.value = ''; remInput.value = '';
-    showToast(`บันทึกพฤติกรรม ${pts > 0 ? '+'+pts : pts} คะแนน ให้รหัส ${studentId} สำเร็จ`);
+    saveState({ behaviors: [...behaviors, { id: `b${Date.now()}_${Math.random()}`, subjectId: selectedSub, studentId: String(studentId), date, points: pts, remark: rem }] });
+    ptsInput.value = ''; 
+    remInput.value = '';
+    showToast(`บันทึกพฤติกรรม ${pts > 0 ? '+'+pts : pts} คะแนน ให้รหัส ${studentId} และซิงค์ลงระบบสำเร็จ`);
   };
 
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
@@ -1398,15 +1344,15 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
       <div className={`p-6 rounded-3xl flex flex-wrap gap-4 items-end shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={selectedSub} onChange={e=>{setSelectedSub(e.target.value); setSelectedRoom('all'); setSelectedSection('all');}} className={inputClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
         <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={selectedRoom} onChange={e=>{setSelectedRoom(e.target.value); setSelectedSection('all');}} className={inputClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
-        <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={selectedSection} onChange={e=>setSelectedSection(e.target.value)} className={inputClass} disabled={selectedRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
+        <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={selectedSection} onChange={e=>setSelectedSection(e.target.value)} className={inputClass}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
         <div><label className="block text-sm font-bold mb-2">วันที่</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} className={inputClass} /></div>
       </div>
 
       <div className={`rounded-3xl overflow-hidden shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm min-w-[800px]">
+          <table className="w-full text-left text-sm min-w-[900px]">
             <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-              <tr><th className="p-4 w-16 text-center">ห้อง</th><th className="p-4 w-16 text-center">ตอน</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4 w-64">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">บันทึกคะแนนพฤติกรรม และ หมายเหตุ</th></tr>
+              <tr><th className="p-4 w-16 text-center">ห้อง</th><th className="p-4 w-16 text-center">ตอน</th><th className="p-4 w-16 text-center">เลขที่</th><th className="p-4 w-56">รหัส / ชื่อ-สกุล</th><th className="p-4 text-center">บันทึกคะแนนพฤติกรรม และ หมายเหตุ</th></tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
               {targetStudents.map(s => (
@@ -1433,93 +1379,175 @@ function TeacherBehavior({ subjects, students, enrollments, behaviors, setBehavi
   );
 }
 
-
-function TeacherMaterials({ subjects, materials, setMaterials, dbUrl, showToast, theme }) {
-  const [form, setForm] = useState({ subjectId: subjects[0]?.id || '', title: '', description: '' });
+function TeacherMaterials({ subjects, materials, saveState, dbUrl, showToast, theme, confirmAction }) {
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ subjectId: subjects[0]?.id || '', title: '', description: '', url: '', coverUrl: '' });
   const [file, setFile] = useState(null);
+  const [coverFile, setCoverFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [confirmDel, setConfirmDel] = useState(null);
+  const [editingId, setEditingId] = useState(null);
   const isDark = theme === 'dark';
 
   const filteredMaterials = materials.filter(m => 
-    String(m.title || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
-    String(m.description || '').toLowerCase().includes(searchQuery.toLowerCase())
+    m.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    m.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (!file) return showToast('กรุณาเลือกไฟล์');
-    if (!dbUrl) return showToast('กรุณาตั้งค่า Database URL ในเมนูตั้งค่าก่อน');
-    
-    setUploading(true);
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = async () => {
-      const base64 = reader.result.split(',')[1];
-      const payload = { action: 'uploadMaterial', filename: file.name, mimeType: file.type, fileData: base64 };
-      try {
-        const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-        const data = await res.json();
-        if (data.url) {
-           // ป้องกัน stale closure ดึงข้อมูลล่าสุดจาก local 
-           let latestMats = materials;
-           try {
-               const localStr = localStorage.getItem('kasem_local_data');
-               if (localStr) {
-                   const localData = JSON.parse(localStr);
-                   if (localData && localData.materials) latestMats = localData.materials;
-               }
-           } catch(e) {}
-           setMaterials([{ id: `m${Date.now()}`, ...form, fileName: file.name, url: data.url, uploadedAt: new Date().toISOString().split('T')[0] }, ...latestMats]);
-           showToast('อัปโหลดไฟล์ไปที่ Google Drive แล้ว');
-           setFile(null); setForm({ ...form, title: '', description: '' });
-        }
-      } catch (error) { showToast('อัปโหลดล้มเหลว ตรวจสอบการเชื่อมต่อ'); } finally { setUploading(false); }
-    };
+  const handleEdit = (m) => {
+    setForm({ subjectId: m.subjectId, title: m.title, description: m.description, url: m.url || '', coverUrl: m.coverUrl || '' });
+    setEditingId(m.id);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const executeDelete = () => { setMaterials(materials.filter(m => m.id !== confirmDel)); setConfirmDel(null); showToast('ลบใบงานเรียบร้อยแล้ว'); };
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (!form.url && !file && !editingId && !coverFile) return showToast('กรุณาระบุลิงก์ หรืออัปโหลดไฟล์ อย่างใดอย่างหนึ่ง');
+    
+    setUploading(true);
+    let finalUrl = form.url;
+    let finalCoverUrl = form.coverUrl;
 
+    try {
+      if (file) {
+        if (!dbUrl) throw new Error('No DB');
+        showToast('กำลังอัปโหลดไฟล์เอกสาร...');
+        const reader = new FileReader();
+        const base64 = await new Promise((resolve) => {
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.readAsDataURL(file);
+        });
+        const payload = { action: 'uploadFile', type: 'material', filename: file.name, mimeType: file.type, fileData: base64 };
+        const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.url) finalUrl = data.url;
+        else throw new Error('Upload Error');
+      }
+
+      if (coverFile) {
+        if (!dbUrl) throw new Error('No DB');
+        showToast('กำลังอัปโหลดรูปภาพประกอบ...');
+        const base64DataUrl = await compressImage(coverFile, 600); 
+        const base64 = base64DataUrl.split(',')[1];
+        const payload = { action: 'uploadFile', type: 'material', filename: `Cover_${Date.now()}.jpg`, mimeType: 'image/jpeg', fileData: base64 };
+        const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.url) finalCoverUrl = data.url;
+      }
+
+      const newMat = { ...form, url: finalUrl, coverUrl: finalCoverUrl };
+
+      if (editingId) {
+         newMat.id = editingId;
+         newMat.uploadedAt = materials.find(m => m.id === editingId)?.uploadedAt || new Date().toISOString().split('T')[0];
+         
+         // ปรับเปลี่ยนจากการใช้ updateRecord แบบเดี่ยว มาเป็นการใช้ระบบ Sync รวมทั้งหมดแทน 
+         // เพื่อแก้ปัญหา Google Sheets ไม่อัปเดตบางคอลัมน์ (เช่น คอลัมน์ที่ว่างไว้ตอนสร้าง แต่มาใส่ข้อมูลตอนแก้ไข)
+         saveState({ materials: materials.map(m => m.id === editingId ? newMat : m) });
+         
+         showToast('แก้ไขสื่อ/ใบงานและซิงค์ข้อมูลสำเร็จ');
+      } else {
+         newMat.id = `m${Date.now()}`;
+         newMat.uploadedAt = new Date().toISOString().split('T')[0];
+         
+         saveState({ materials: [newMat, ...materials] });
+         showToast('เพิ่มสื่อการเรียนและซิงค์ลงระบบสำเร็จ');
+      }
+      
+      setUploading(false);
+      setShowForm(false);
+      setEditingId(null);
+      setForm({ subjectId: subjects[0]?.id || '', title: '', description: '', url: '', coverUrl: '' });
+      setFile(null);
+      setCoverFile(null);
+    } catch (err) {
+      setUploading(false);
+      return showToast('อัปโหลดหรือบันทึกล้มเหลว ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+  };
+
+  const handleDelete = (id) => { 
+    if(confirmAction) {
+      confirmAction('ยืนยันการลบเอกสาร/สื่อการเรียนนี้ใช่หรือไม่?', async () => {
+        saveState({ materials: materials.filter(m => m.id !== id) }, true); 
+        if (dbUrl) {
+          try {
+            await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'deleteRecord', sheetName: 'materials', keyField: 'id', keyValue: String(id) }) });
+            showToast('ลบสื่อการเรียนสำเร็จ');
+          } catch(e){}
+        }
+      });
+    }
+  };
+  
   const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-       <ConfirmModal isOpen={!!confirmDel} title="ยืนยันการลบเอกสารใบงาน" message="คุณต้องการลบสื่อการเรียน/ใบงานนี้ใช่หรือไม่? ไฟล์ที่อยู่บน Google Drive จะไม่ถูกลบ แต่จะไม่แสดงในระบบนี้อีก" onConfirm={executeDelete} onCancel={() => setConfirmDel(null)} theme={theme} />
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
          <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3"><FolderOpen className="mr-2 text-blue-500"/> คลังสื่อการเรียน / ใบงาน</h2>
-         <div className="relative w-full sm:w-auto">
-           <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} size={18} />
-           <input type="text" placeholder="ค้นหาใบงาน..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className={`pl-10 pr-4 py-2.5 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200'}`} />
+         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+           <div className="relative w-full sm:w-auto">
+             <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} size={18} />
+             <input type="text" placeholder="ค้นหาใบงาน..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className={`pl-10 pr-4 py-2.5 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200'}`} />
+           </div>
+           <button onClick={() => {setShowForm(!showForm); if(showForm){setEditingId(null); setForm({ subjectId: subjects[0]?.id || '', title: '', description: '', url: '', coverUrl: '' }); setFile(null); setCoverFile(null);}}} className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md whitespace-nowrap"><Plus size={16} className="inline mr-2"/> เพิ่มสื่อใหม่</button>
          </div>
        </div>
 
-       <div className={`p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <form onSubmit={handleUpload} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-             <div><label className="block text-sm font-bold mb-2">วิชา</label><select value={form.subjectId} onChange={e=>setForm({...form, subjectId: e.target.value})} className={inputClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-             <div><label className="block text-sm font-bold mb-2">ชื่อเอกสาร / ใบงาน</label><input required type="text" value={form.title} onChange={e=>setForm({...form, title: e.target.value})} className={inputClass}/></div>
-             <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">คำอธิบาย (ถ้ามี)</label><input type="text" value={form.description} onChange={e=>setForm({...form, description: e.target.value})} className={inputClass}/></div>
-             <div className={`md:col-span-2 border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer relative transition-colors ${isDark ? 'border-blue-500/50 bg-blue-900/20 hover:bg-blue-900/40' : 'border-blue-300 bg-blue-50/50 hover:bg-blue-100'}`}>
-               <input type="file" required onChange={e=>setFile(e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
-               <Upload size={40} className="mx-auto text-blue-500 mb-3"/>
-               <p className="font-bold text-blue-500 text-lg">{file ? file.name : 'คลิกหรือลากไฟล์เอกสารมาวาง (PDF/Image)'}</p>
-             </div>
-             <div className="md:col-span-2 flex justify-end mt-2"><button type="submit" disabled={uploading} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 disabled:opacity-50">{uploading ? 'กำลังอัปโหลดไป Drive...' : 'อัปโหลดสื่อ'}</button></div>
-          </form>
-       </div>
+       {showForm && (
+         <div className={`p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <h3 className="text-lg font-black mb-4 border-b pb-3 dark:border-slate-700">{editingId ? 'แก้ไขสื่อการเรียน / ใบงาน' : 'เพิ่มสื่อการเรียน / ใบงานใหม่'}</h3>
+            <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+               <div><label className="block text-sm font-bold mb-2">วิชา</label><select value={form.subjectId} onChange={e=>setForm({...form, subjectId: e.target.value})} className={inputClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+               <div><label className="block text-sm font-bold mb-2">ชื่อเอกสาร / ใบงาน</label><input required type="text" value={form.title} onChange={e=>setForm({...form, title: e.target.value})} className={inputClass}/></div>
+               <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">คำอธิบาย (ถ้ามี)</label><input type="text" value={form.description} onChange={e=>setForm({...form, description: e.target.value})} className={inputClass}/></div>
+               
+               <div className="md:col-span-2">
+                 <label className="block text-sm font-bold mb-2 text-blue-500 flex items-center"><LinkIcon size={16} className="mr-2"/> แปะลิงก์ (URL) ของไฟล์ / ใบงาน / สื่อประกอบ (ไม่บังคับหากมีไฟล์แนบ)</label>
+                 <input type="url" placeholder="ไม่บังคับหากมีการอัปโหลดไฟล์เอกสาร หรือหน้าปก" value={form.url} onChange={e=>setForm({...form, url: e.target.value})} className={inputClass}/>
+               </div>
+
+               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                 <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                   <label className="block text-sm font-bold mb-2 text-emerald-500 flex items-center"><ImageIcon size={16} className="mr-2"/> แนบรูปภาพประกอบ (หน้าปกสื่อ)</label>
+                   <input type="file" accept="image/*" onChange={e=>setCoverFile(e.target.files[0])} className={inputClass} />
+                 </div>
+                 <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                   <div className="text-sm font-bold mb-2 text-slate-500 flex items-center"><Upload size={16} className="mr-2"/> หรืออัปโหลดไฟล์เอกสาร (PDF/Word)</div>
+                   <input type="file" onChange={e=>setFile(e.target.files[0])} className={inputClass} />
+                 </div>
+               </div>
+
+               <div className="md:col-span-2 flex justify-end mt-4 gap-3">
+                 {editingId && <button type="button" onClick={() => {setShowForm(false); setEditingId(null); setForm({ subjectId: subjects[0]?.id || '', title: '', description: '', url: '', coverUrl: '' }); setFile(null); setCoverFile(null);}} className={`px-6 py-3 rounded-xl font-bold ${isDark ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>ยกเลิก</button>}
+                 <button type="submit" disabled={uploading} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 disabled:opacity-50">
+                   {uploading ? 'กำลังบันทึก...' : (editingId ? 'บันทึกการแก้ไข' : 'บันทึกสื่อการเรียน')}
+                 </button>
+               </div>
+            </form>
+         </div>
+       )}
 
        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
          {filteredMaterials.map(m => {
             const sub = subjects.find(s => s.id === m.subjectId);
             return (
-              <div key={m.id} className={`p-5 rounded-2xl shadow-sm relative group border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                <button onClick={()=>setConfirmDel(m.id)} className="absolute top-4 right-4 text-red-400 opacity-0 group-hover:opacity-100"><Trash2 size={16}/></button>
-                <div className="text-xs bg-blue-500/10 text-blue-500 font-bold px-3 py-1.5 rounded inline-block mb-3">{sub?.name}</div>
-                <h4 className="font-black text-lg">{m.title}</h4>
-                <p className={`text-sm my-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m.description}</p>
+              <div key={m.id} className={`p-5 rounded-2xl shadow-sm relative group border flex flex-col justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                <div className="absolute top-4 right-4 flex gap-2 z-10">
+                   <button onClick={() => handleEdit(m)} className={`p-2 rounded-lg transition-colors ${isDark ? 'bg-slate-700 text-blue-400 hover:bg-slate-600' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`} title="แก้ไข"><Edit size={16}/></button>
+                   <button onClick={() => handleDelete(m.id)} className={`p-2 rounded-lg transition-colors ${isDark ? 'bg-slate-700 text-red-400 hover:bg-slate-600' : 'bg-red-50 text-red-500 hover:bg-red-100'}`} title="ลบเอกสาร"><Trash2 size={16}/></button>
+                </div>
+                <div>
+                  <div className="text-xs bg-blue-500/10 text-blue-500 font-bold px-3 py-1.5 rounded inline-block mb-3">{sub?.name}</div>
+                  {m.coverUrl && <img src={getValidImgUrl(m.coverUrl)} alt="Cover" className="w-full h-48 object-cover rounded-xl mb-4 border border-slate-200 dark:border-slate-700" />}
+                  <h4 className="font-black text-lg pr-20">{m.title}</h4>
+                  <p className={`text-sm my-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m.description}</p>
+                </div>
                 <div className={`mt-4 pt-4 border-t flex justify-between items-center ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                  <span className="text-xs text-slate-500 font-bold">อัปโหลด: {m.uploadedAt}</span>
-                  <a href={m.url} target="_blank" rel="noreferrer" className="text-blue-500 font-bold text-sm bg-blue-500/10 px-4 py-2 rounded-lg hover:bg-blue-500/20 flex items-center"><DownloadCloud size={14} className="mr-2"/> เปิด Folder Drive</a>
+                  <span className="text-xs text-slate-500 font-bold">เพิ่มเมื่อ: {m.uploadedAt}</span>
+                  {m.url && <a href={m.url} target="_blank" rel="noreferrer" className="text-blue-500 font-bold text-sm bg-blue-500/10 px-4 py-2 rounded-lg hover:bg-blue-500/20 flex items-center"><ExternalLink size={14} className="mr-2"/> เปิดดูเอกสาร</a>}
                 </div>
               </div>
             )
@@ -1530,358 +1558,355 @@ function TeacherMaterials({ subjects, materials, setMaterials, dbUrl, showToast,
   );
 }
 
-function TeacherAssignments({ assignments, setAssignments, subjects, showToast, theme, getUniqueRooms, dbUrl }) {
+function TeacherAssignments({ assignments, saveState, subjects, students, enrollments, showToast, theme, dbUrl, confirmAction }) {
   const [showForm, setShowForm] = useState(false);
-  const [newAsg, setNewAsg] = useState({ subjectId: subjects[0]?.id || '', title: '', description: '', maxScore: 10, dueDate: '', targetRoom: 'all', linkUrl: '' });
-  const [imageFile, setImageFile] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
-  
-  const [editAsg, setEditAsg] = useState(null);
-  const [confirmDel, setConfirmDel] = useState(null);
-  
+  const [editingId, setEditingId] = useState(null);
+  const [newAsg, setNewAsg] = useState({ subjectId: subjects[0]?.id || '', title: '', description: '', linkUrl: '', maxScore: 10, dueDate: '', targetRooms: [] });
   const isDark = theme === 'dark';
 
-  const handleCreate = async (e) => {
+  const subjectEnrolledSts = students.filter(s => enrollments.some(e => e.subjectId === newAsg.subjectId && String(e.studentId) === String(s.id)));
+  const subjectRooms = [...new Set(subjectEnrolledSts.map(s => String(s.room)))].filter(Boolean).sort();
+
+  const handleSaveAsg = (e) => {
     e.preventDefault();
     if(!newAsg.subjectId) return showToast('กรุณาสร้างวิชาเรียนก่อน');
 
-    let uploadedImageUrl = '';
-    if (imageFile) {
-      if (!dbUrl) return showToast('กรุณาตั้งค่า Database URL เพื่ออัปโหลดรูปภาพ');
-      setIsUploading(true);
-      try {
-        const reader = new FileReader();
-        reader.readAsDataURL(imageFile);
-        await new Promise((resolve) => {
-          reader.onload = async () => {
-            const base64 = reader.result.split(',')[1];
-            const payload = { action: 'uploadAssignmentImg', filename: `asg_${Date.now()}_${imageFile.name}`, mimeType: imageFile.type, fileData: base64 };
-            const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-            const data = await res.json();
-            if (data.url) uploadedImageUrl = data.url;
-            resolve();
-          };
-        });
-      } catch (error) {
-        showToast('อัปโหลดรูปภาพล้มเหลว งานจะถูกสร้างโดยไม่มีรูปประกอบ');
-      } finally {
-        setIsUploading(false);
-      }
+    if (editingId) {
+       saveState({ assignments: assignments.map(a => a.id === editingId ? { ...newAsg, id: editingId } : a) });
+       showToast('แก้ไขงานและซิงค์เข้าระบบสำเร็จ');
+    } else {
+       saveState({ assignments: [...assignments, { ...newAsg, id: `a${Date.now()}` }] });
+       showToast('สร้างงานใหม่และซิงค์เข้าระบบสำเร็จ');
     }
-
-    let latestAsgs = assignments;
-    try {
-        const localStr = localStorage.getItem('kasem_local_data');
-        if (localStr) {
-            const localData = JSON.parse(localStr);
-            if (localData && localData.assignments) latestAsgs = localData.assignments;
-        }
-    } catch(e) {}
-
-    setAssignments([{ ...newAsg, id: `a${Date.now()}`, imageUrl: uploadedImageUrl }, ...latestAsgs]);
-    setShowForm(false); showToast('สร้างงานใหม่สำเร็จ');
-    setNewAsg({ subjectId: subjects[0]?.id || '', title: '', description: '', maxScore: 10, dueDate: '', targetRoom: 'all', linkUrl: '' });
-    setImageFile(null);
-  };
-
-  const handleSaveEdit = async (e) => {
-    e.preventDefault();
     
-    let uploadedImageUrl = editAsg.imageUrl || '';
-    if (imageFile) {
-      if (!dbUrl) return showToast('กรุณาตั้งค่า Database URL เพื่ออัปโหลดรูปภาพ');
-      setIsUploading(true);
-      try {
-        const reader = new FileReader();
-        reader.readAsDataURL(imageFile);
-        await new Promise((resolve) => {
-          reader.onload = async () => {
-            const base64 = reader.result.split(',')[1];
-            const payload = { action: 'uploadAssignmentImg', filename: `asg_${Date.now()}_${imageFile.name}`, mimeType: imageFile.type, fileData: base64 };
-            const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-            const data = await res.json();
-            if (data.url) uploadedImageUrl = data.url;
-            resolve();
-          };
-        });
-      } catch (error) {
-        showToast('อัปโหลดรูปภาพล้มเหลว งานจะถูกอัปเดตโดยไม่มีรูปใหม่');
-      } finally {
-        setIsUploading(false);
-      }
+    setShowForm(false);
+    setEditingId(null);
+    setNewAsg({ subjectId: subjects[0]?.id || '', title: '', description: '', linkUrl: '', maxScore: 10, dueDate: '', targetRooms: [] });
+  };
+  
+  const handleEdit = (asg) => {
+    setNewAsg(asg);
+    setEditingId(asg.id);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDelete = (id) => {
+    if(confirmAction) {
+      confirmAction('ยืนยันลบงานนี้ใช่หรือไม่?\n(คะแนนและการส่งงานทั้งหมดในงานนี้จะถูกลบออกจากระบบด้วย)', async () => {
+         saveState({ assignments: assignments.filter(a => a.id !== id) }, true);
+         if (dbUrl) {
+           try {
+             await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'deleteRecord', sheetName: 'assignments', keyField: 'id', keyValue: String(id) }) });
+             showToast('ลบงานเรียบร้อยแล้ว');
+           } catch(e){}
+         }
+      });
     }
-
-    setAssignments(assignments.map(a => a.id === editAsg.id ? { ...editAsg, imageUrl: uploadedImageUrl } : a));
-    setEditAsg(null);
-    setImageFile(null);
-    showToast('แก้ไขงานสำเร็จ');
   };
 
-  const executeDelete = () => {
-    setAssignments(assignments.filter(a => a.id !== confirmDel));
-    setConfirmDel(null);
-    showToast('ลบงานเรียบร้อยแล้ว');
+  const handleRoomToggle = (room) => {
+    if(newAsg.targetRooms.includes(room)) {
+      setNewAsg({...newAsg, targetRooms: newAsg.targetRooms.filter(r => r !== room)});
+    } else {
+      setNewAsg({...newAsg, targetRooms: [...newAsg.targetRooms, room]});
+    }
   };
 
-  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 border font-bold ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`;
+  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      
-      <ConfirmModal isOpen={!!confirmDel} title="ยืนยันการลบงาน" message="คุณต้องการลบงานนี้ใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้" onConfirm={executeDelete} onCancel={() => setConfirmDel(null)} theme={theme} />
-
+    <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3"><BookOpen className="mr-2 text-blue-500"/> จัดการงานเก็บคะแนน</h2>
-        <button onClick={() => {setShowForm(!showForm); setEditAsg(null);}} className="flex items-center px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors"><Plus size={16} className="mr-2" /> สร้างงานใหม่</button>
+        <button onClick={() => {setShowForm(!showForm); if(showForm) { setEditingId(null); setNewAsg({ subjectId: subjects[0]?.id || '', title: '', description: '', linkUrl: '', maxScore: 10, dueDate: '', targetRooms: [] }); }}} className="flex items-center px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold shadow-md"><Plus size={16} className="mr-2" /> สร้างงานใหม่</button>
       </div>
 
-      {(showForm || editAsg) && (
-        <form onSubmit={editAsg ? handleSaveEdit : handleCreate} className={`p-8 rounded-3xl shadow-sm grid grid-cols-1 md:grid-cols-2 gap-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            
-            <div className="md:col-span-2 flex justify-between items-center mb-2">
-              <h3 className="text-xl font-black text-blue-500">{editAsg ? 'แก้ไขงาน' : 'สร้างงานใหม่'}</h3>
-              {editAsg && <button type="button" onClick={() => setEditAsg(null)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>}
-            </div>
-
-            {/* Form Fields */}
-            <div>
-              <label className="block text-sm font-bold mb-2">เลือกวิชา *</label>
-              <select required value={editAsg ? editAsg.subjectId : newAsg.subjectId} onChange={e => editAsg ? setEditAsg({...editAsg, subjectId: e.target.value}) : setNewAsg({...newAsg, subjectId: e.target.value})} className={inputClass}>
+      {showForm && (
+        <form onSubmit={handleSaveAsg} className={`p-8 rounded-3xl shadow-sm grid grid-cols-1 md:grid-cols-2 gap-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-bold mb-2">เลือกวิชา</label>
+              <select required value={newAsg.subjectId} onChange={e => setNewAsg({...newAsg, subjectId: e.target.value, targetRooms: []})} className={inputClass}>
                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-bold mb-2 flex items-center text-emerald-600 dark:text-emerald-500"><Users size={16} className="mr-1.5"/> มอบหมายเฉพาะห้องเรียน</label>
-              <select value={editAsg ? editAsg.targetRoom : newAsg.targetRoom} onChange={e => editAsg ? setEditAsg({...editAsg, targetRoom: e.target.value}) : setNewAsg({...newAsg, targetRoom: e.target.value})} className={inputClass}>
-                <option value="all">ทุกห้องที่เรียนวิชานี้ (เห็นทุกคน)</option>
-                {getUniqueRooms().map(r => <option key={r} value={r}>ห้อง {r}</option>)}
-              </select>
-            </div>
             
-            <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">ชื่องาน *</label><input required type="text" value={editAsg ? editAsg.title : newAsg.title} onChange={e => editAsg ? setEditAsg({...editAsg, title: e.target.value}) : setNewAsg({...newAsg, title: e.target.value})} className={inputClass} placeholder="เช่น ใบงานที่ 1.1 / ส่งสมุด..." /></div>
-            <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">คำสั่ง / รายละเอียด *</label><textarea required value={editAsg ? editAsg.description : newAsg.description} onChange={e => editAsg ? setEditAsg({...editAsg, description: e.target.value}) : setNewAsg({...newAsg, description: e.target.value})} className={`${inputClass} h-24`} placeholder="อธิบายสิ่งที่นักเรียนต้องทำ..." /></div>
-            
-            <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-5 pt-4 border-t border-dashed border-slate-300 dark:border-slate-600">
-              <div>
-                <label className="block text-sm font-bold mb-2 flex items-center"><ExternalLink size={16} className="mr-2 text-indigo-500"/> แนบลิงก์เพิ่มเติม (ถ้ามี)</label>
-                <input type="text" value={editAsg ? (editAsg.linkUrl || '') : newAsg.linkUrl} onChange={e => editAsg ? setEditAsg({...editAsg, linkUrl: e.target.value}) : setNewAsg({...newAsg, linkUrl: e.target.value})} className={inputClass} placeholder="เช่น https://youtube.com/..." />
-              </div>
-              <div>
-                <label className="block text-sm font-bold mb-2 flex items-center"><ImageIcon size={16} className="mr-2 text-pink-500"/> แนบรูปภาพใหม่ (แทนที่รูปเดิม)</label>
-                <div className={`border-2 border-dashed rounded-xl p-3 text-center relative cursor-pointer transition-colors ${isDark ? 'border-slate-600 bg-slate-900/50 hover:border-pink-500' : 'border-slate-300 bg-slate-50 hover:border-pink-500'}`}>
-                   <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-                   <span className={`text-sm font-bold ${imageFile ? 'text-pink-500' : (isDark ? 'text-slate-400' : 'text-slate-500')}`}>{imageFile ? imageFile.name : 'คลิกเพื่อเลือกไฟล์รูปภาพ'}</span>
-                </div>
-              </div>
+            <div className="md:col-span-2">
+               <label className="block text-sm font-bold mb-2 text-blue-500">มอบหมายให้ห้องเรียน (เว้นว่างไว้เพื่อมอบหมายให้ทุกคน)</label>
+               <div className="flex flex-wrap gap-3">
+                 <label className={`flex items-center px-4 py-2 rounded-xl border cursor-pointer transition-all ${newAsg.targetRooms.length === 0 ? (isDark ? 'bg-blue-600 border-blue-600 text-white' : 'bg-blue-100 border-blue-300 text-blue-800') : (isDark ? 'border-slate-700 bg-slate-900 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500')}`}>
+                   <input type="checkbox" checked={newAsg.targetRooms.length === 0} onChange={() => setNewAsg({...newAsg, targetRooms: []})} className="hidden" />
+                   ทุกห้อง (All)
+                 </label>
+                 {subjectRooms.map(r => (
+                   <label key={r} className={`flex items-center px-4 py-2 rounded-xl border cursor-pointer transition-all ${newAsg.targetRooms.includes(r) ? (isDark ? 'bg-blue-600 border-blue-600 text-white' : 'bg-blue-100 border-blue-300 text-blue-800') : (isDark ? 'border-slate-700 bg-slate-900 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500')}`}>
+                     <input type="checkbox" checked={newAsg.targetRooms.includes(r)} onChange={() => handleRoomToggle(r)} className="hidden" />
+                     ห้อง {r}
+                   </label>
+                 ))}
+               </div>
             </div>
 
-            <div><label className="block text-sm font-bold mb-2">คะแนนเต็ม *</label><input required type="number" min="1" value={editAsg ? editAsg.maxScore : newAsg.maxScore} onChange={e => editAsg ? setEditAsg({...editAsg, maxScore: parseInt(e.target.value)}) : setNewAsg({...newAsg, maxScore: parseInt(e.target.value)})} className={inputClass} /></div>
-            <div><label className="block text-sm font-bold mb-2">กำหนดส่ง *</label><input required type="date" value={editAsg ? editAsg.dueDate : newAsg.dueDate} onChange={e => editAsg ? setEditAsg({...editAsg, dueDate: e.target.value}) : setNewAsg({...newAsg, dueDate: e.target.value})} className={inputClass} /></div>
-            <div className="md:col-span-2 flex justify-end mt-4">
-              <button type="submit" disabled={isUploading} className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md flex items-center disabled:opacity-50">
-                {isUploading ? <><RefreshCw size={18} className="mr-2 animate-spin"/> กำลังอัปโหลด...</> : (editAsg ? 'บันทึกการแก้ไข' : 'บันทึกงานเก็บคะแนน')}
-              </button>
+            <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">ชื่องาน</label><input required type="text" value={newAsg.title} onChange={e => setNewAsg({...newAsg, title: e.target.value})} className={inputClass} /></div>
+            <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">คำสั่ง</label><textarea required value={newAsg.description} onChange={e => setNewAsg({...newAsg, description: e.target.value})} className={`${inputClass} h-24`} /></div>
+            
+            <div className="md:col-span-2">
+              <label className="block text-sm font-bold mb-2 flex items-center"><LinkIcon size={16} className="mr-2"/> แนบลิงก์เอกสาร หรือ ลิงก์รูปภาพประกอบ (URL) - ถ้ามี</label>
+              <input type="url" value={newAsg.linkUrl} onChange={e => setNewAsg({...newAsg, linkUrl: e.target.value})} placeholder="https://..." className={inputClass} />
+            </div>
+
+            <div><label className="block text-sm font-bold mb-2">คะแนนเต็ม</label><input required type="number" min="1" value={newAsg.maxScore} onChange={e => setNewAsg({...newAsg, maxScore: parseInt(e.target.value)})} className={inputClass} /></div>
+            <div><label className="block text-sm font-bold mb-2">กำหนดส่ง</label><input required type="date" value={newAsg.dueDate} onChange={e => setNewAsg({...newAsg, dueDate: e.target.value})} className={inputClass} /></div>
+            
+            <div className="md:col-span-2 flex justify-end gap-3 mt-2">
+               {editingId && <button type="button" onClick={() => {setShowForm(false); setEditingId(null); setNewAsg({ subjectId: subjects[0]?.id || '', title: '', description: '', linkUrl: '', maxScore: 10, dueDate: '', targetRooms: [] });}} className={`px-6 py-3 rounded-xl font-bold ${isDark ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>ยกเลิก</button>}
+               <button type="submit" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md">{editingId ? 'บันทึกการแก้ไข' : 'บันทึกงาน'}</button>
             </div>
         </form>
       )}
 
-      <div className="space-y-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {assignments.map(asg => {
           const sub = subjects.find(s => s.id === asg.subjectId);
           return (
-            <div key={asg.id} className={`p-6 rounded-3xl shadow-sm border flex flex-col md:flex-row gap-6 relative group ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              
-              <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                 <button onClick={() => {setEditAsg(asg); setShowForm(false); window.scrollTo(0, 0);}} className={`p-2 rounded-lg transition-colors text-amber-500 shadow-sm ${isDark ? 'bg-slate-700 hover:bg-slate-600' : 'bg-white hover:bg-slate-50 border border-slate-200'}`} title="แก้ไขงาน"><Edit size={16}/></button>
-                 <button onClick={() => setConfirmDel(asg.id)} className={`p-2 rounded-lg transition-colors text-red-500 shadow-sm ${isDark ? 'bg-slate-700 hover:bg-slate-600' : 'bg-white hover:bg-slate-50 border border-slate-200'}`} title="ลบงาน"><Trash2 size={16}/></button>
+            <div key={asg.id} className={`p-6 rounded-3xl shadow-sm border flex flex-col justify-between relative group ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className="absolute top-4 right-4 flex gap-2 z-10">
+                 <button onClick={() => handleEdit(asg)} className={`p-2 rounded-lg transition-colors ${isDark ? 'bg-slate-700 text-blue-400 hover:bg-slate-600' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`} title="แก้ไขงาน"><Edit size={16}/></button>
+                 <button onClick={() => handleDelete(asg.id)} className={`p-2 rounded-lg transition-colors ${isDark ? 'bg-slate-700 text-red-400 hover:bg-slate-600' : 'bg-red-50 text-red-600 hover:bg-red-100'}`} title="ลบงาน"><Trash2 size={16}/></button>
               </div>
 
-              {asg.imageUrl && (
-                <div className="w-full md:w-56 h-40 shrink-0 rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
-                  <img src={getValidImgUrl(asg.imageUrl)} alt="Assignment" className="w-full h-full object-cover"/>
+              <div>
+                <div className="flex justify-between items-start mb-4 gap-2 pr-20">
+                  <h3 className="text-xl font-black">{asg.title}</h3>
+                  <span className="text-xs font-bold bg-blue-500/10 text-blue-500 px-3 py-1.5 rounded-lg shrink-0">{sub?.name}</span>
                 </div>
-              )}
-              <div className="flex-1 flex flex-col justify-between">
-                <div>
-                  <div className="flex flex-col sm:flex-row justify-between items-start mb-4 gap-3 pr-20">
-                    <h3 className="text-xl font-black text-blue-600 dark:text-blue-400 leading-tight">{asg.title}</h3>
-                    <div className="flex flex-wrap gap-2 shrink-0">
-                      <span className="text-xs font-bold bg-blue-500/10 text-blue-500 px-3 py-1.5 rounded-lg">{sub?.name}</span>
-                      {asg.targetRoom && asg.targetRoom !== 'all' && <span className="text-xs font-bold bg-emerald-500 text-white px-3 py-1.5 rounded-lg shadow-sm">เฉพาะห้อง {asg.targetRoom}</span>}
-                    </div>
-                  </div>
-                  <p className={`text-sm mb-5 p-4 rounded-xl font-medium border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-100 text-slate-600'}`}>{asg.description}</p>
-                  
-                  {asg.linkUrl && (
-                    <div className="mb-5">
-                       <a href={asg.linkUrl.startsWith('http') ? asg.linkUrl : `https://${asg.linkUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><ExternalLink size={14} className="mr-2"/> เปิดลิงก์แนบ</a>
-                    </div>
-                  )}
+                
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+                    มอบหมาย: {!asg.targetRooms || asg.targetRooms.length === 0 ? 'ทุกห้อง' : `ห้อง ${asg.targetRooms.join(', ')}`}
+                  </span>
                 </div>
-                <div className={`flex flex-wrap gap-2 text-xs font-bold pt-4 border-t mt-auto ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
-                  <span className={`px-4 py-2 rounded-lg shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}><BarChart2 size={12} className="inline mr-1 text-emerald-500"/> เต็ม: {asg.maxScore}</span>
-                  <span className={`px-4 py-2 rounded-lg shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}><Clock size={12} className="inline mr-1 text-amber-500"/> กำหนดส่ง: {asg.dueDate}</span>
-                </div>
+
+                <p className={`text-sm mb-4 p-4 rounded-xl font-medium border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-100 text-slate-600'}`}>{asg.description}</p>
+                
+                {asg.linkUrl && (
+                  <a href={asg.linkUrl} target="_blank" rel="noreferrer" className={`mb-5 inline-flex items-center text-sm font-bold px-4 py-2 rounded-xl transition-colors ${isDark ? 'bg-blue-900/30 text-blue-400 hover:bg-blue-900/50' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}>
+                    <ExternalLink size={16} className="mr-2"/> เปิดดูลักษณะงาน/ภาพประกอบ
+                  </a>
+                )}
+              </div>
+              <div className={`flex flex-wrap gap-2 text-xs font-bold pt-4 border-t ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
+                <span className={`px-4 py-2 rounded-lg shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>เต็ม: {asg.maxScore}</span>
+                <span className={`px-4 py-2 rounded-lg shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>กำหนดส่ง: {asg.dueDate}</span>
               </div>
             </div>
           );
         })}
-        {assignments.length === 0 && <div className={`text-center py-16 rounded-3xl border font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีการสร้างงานเก็บคะแนน</div>}
       </div>
     </div>
   );
 }
 
-function TeacherGrading({ assignments, submissions, setSubmissions, students, subjects, enrollments, showToast, theme, getUniqueRooms, getUniqueSections }) {
+function TeacherGrading({ subjects, assignments, students, submissions, setSubmissions, showToast, theme, dbUrl }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterAsg, setFilterAsg] = useState('all');
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSection, setFilterSection] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all'); 
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [selectedSubm, setSelectedSubm] = useState(null);
+  const [scoreForm, setScoreForm] = useState({ score: 0, penalty: 0 });
+  const [isSaving, setIsSaving] = useState(false);
   const isDark = theme === 'dark';
 
-  const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
-  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = getUniqueRooms();
-  const dynamicSections = getUniqueSections(filterRoom);
-  const availableAsgs = assignments.filter(a => a.subjectId === filterSub);
+  const targetAsgs = assignments.filter(a => a.subjectId === filterSub);
+  const targetAsgIds = targetAsgs.map(a => a.id);
 
-  const filteredSubs = submissions.filter(sub => {
-    const asg = assignments.find(a => a.id === sub.assignmentId);
-    const stu = students.find(s => String(s.id).trim() === String(sub.studentId).trim());
-    if (!asg || !stu) return false;
-    if (filterSub && asg.subjectId !== filterSub) return false;
-    if (filterAsg !== 'all' && asg.id !== filterAsg) return false;
-    if (filterRoom !== 'all' && String(stu.room || '').trim() !== String(filterRoom).trim()) return false;
-    if (filterSection !== 'all' && String(stu.section || '').trim() !== String(filterSection).trim()) return false;
-    if (filterStatus !== 'all' && sub.status !== filterStatus) return false;
-    return true;
+  const relevantSubms = submissions.filter(s => targetAsgIds.includes(s.assignmentId) && s.status === 'submitted');
+  const submStus = relevantSubms.map(subm => students.find(s => String(s.id) === String(subm.studentId))).filter(Boolean);
+  
+  const dynamicRooms = [...new Set(submStus.map(s => s.room))].filter(Boolean).sort();
+  const dynamicSections = [...new Set(submStus.filter(s => filterRoom === 'all' || String(s.room) === String(filterRoom)).map(s => String(s.section || '')))].filter(s => s && s !== '-').sort();
+
+  const targetSubms = relevantSubms.filter(subm => {
+     const stu = students.find(s => String(s.id) === String(subm.studentId));
+     if (!stu) return false;
+     
+     const matchAsg = filterAsg === 'all' || subm.assignmentId === filterAsg;
+     const matchRoom = filterRoom === 'all' || String(stu.room) === String(filterRoom);
+     const matchSection = filterSection === 'all' || String(stu.section || '') === String(filterSection);
+     
+     const searchLower = searchQuery.toLowerCase();
+     const matchSearch = !searchQuery || 
+                         stu.name.toLowerCase().includes(searchLower) || 
+                         String(stu.id).includes(searchLower);
+
+     return matchAsg && matchRoom && matchSection && matchSearch;
   });
 
-  const handleGrade = (subId, maxScore) => {
-    const scoreInput = document.getElementById(`score-${subId}`).value;
-    const penaltyInput = document.getElementById(`penalty-${subId}`).value || 0;
-    
-    const rawScore = parseFloat(scoreInput);
-    const penalty = parseFloat(penaltyInput);
-    
-    if (isNaN(rawScore) || rawScore < 0 || rawScore > maxScore) return showToast(`คะแนนต้องอยู่ระหว่าง 0 - ${maxScore}`);
-    
-    const finalScore = Math.max(0, rawScore - penalty);
-    
-    setSubmissions(submissions.map(s => s.id === subId ? { ...s, status: 'graded', score: finalScore, rawScore, penalty } : s)); 
-    showToast('บันทึกคะแนนและประเมินเรียบร้อย');
+  const handleSaveGrade = async (e) => {
+     e.preventDefault();
+     setIsSaving(true);
+     const rawScore = Number(scoreForm.score);
+     const penalty = Number(scoreForm.penalty);
+     const finalScore = Math.max(0, rawScore - penalty);
+     
+     try {
+       showToast('กำลังบันทึกคะแนน...');
+       if (dbUrl) {
+         await fetch(dbUrl, {
+           method: 'POST',
+           body: JSON.stringify({
+             action: 'updateRecord',
+             sheetName: 'submissions',
+             keyField: 'id',
+             keyValue: selectedSubm.id,
+             updateData: { status: 'graded', rawScore, penalty, score: finalScore }
+           })
+         });
+       }
+       
+       const updatedSubmissions = submissions.map(s =>
+          s.id === selectedSubm.id ? { ...s, status: 'graded', rawScore, penalty, score: finalScore } : s
+       );
+       setSubmissions(updatedSubmissions);
+       showToast('บันทึกคะแนนสำเร็จ ซิงค์ข้อมูลลงระบบแล้ว');
+     } catch (e) {
+       showToast('บันทึกไม่สำเร็จ ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+     }
+
+     setSelectedSubm(null);
+     setIsSaving(false);
   };
 
-  const handleEditGrade = (subId) => {
-    setSubmissions(submissions.map(s => s.id === subId ? { ...s, status: 'submitted' } : s));
+  const handleDownloadLegacyBase64 = (base64Data, studentName) => {
+     const link = document.createElement('a');
+     link.href = base64Data;
+     link.download = `งานของ_${studentName || 'นักเรียน'}`;
+     document.body.appendChild(link);
+     link.click();
+     document.body.removeChild(link);
   };
 
-  const handleRejectSubmission = (subId) => {
-    if(window.confirm('คุณต้องการยกเลิกการส่งงานของนักเรียนคนนี้ เพื่อให้ส่งใหม่ใช่หรือไม่?')) {
-       setSubmissions(submissions.filter(s => s.id !== subId));
-       showToast('ยกเลิกการส่งงานเรียบร้อย นักเรียนสามารถส่งใหม่ได้แล้ว');
-    }
-  };
-
-  const selectClass = `font-bold rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
+  const selectClass = `font-bold rounded-xl p-3 outline-none border focus:ring-2 focus:ring-blue-500 flex-1 min-w-[150px] ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
 
   return (
-    <div className={`max-w-6xl mx-auto rounded-3xl overflow-hidden shadow-sm flex flex-col h-[calc(100vh-120px)] border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-      <div className={`p-5 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 border-b shrink-0 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50/50 border-slate-200'}`}>
-        <h2 className="text-lg font-black flex items-center shrink-0"><CheckSquare className="mr-2 text-blue-500" size={20} /> ตรวจงานนักเรียน</h2>
-        <div className="flex flex-wrap gap-2 w-full xl:w-auto">
-          <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterAsg('all'); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-          <select value={filterAsg} onChange={e => setFilterAsg(e.target.value)} className={selectClass}><option value="all">ทุกงานในวิชานี้</option>{availableAsgs.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}</select>
-          <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
-          <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass} disabled={filterRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s => <option key={s} value={s}>ตอน {s}</option>)}</select>
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={`font-bold rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 border ${filterStatus === 'submitted' ? 'bg-amber-100 text-amber-700 border-amber-200' : filterStatus === 'graded' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : (isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300')}`}>
-             <option value="all">สถานะทั้งหมด</option><option value="submitted">⏳ รอตรวจ</option><option value="graded">✅ ตรวจแล้ว</option>
-          </select>
-        </div>
-      </div>
-      <div className={`p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1 ${isDark ? 'bg-slate-900/30' : 'bg-slate-50/30'}`}>
-        {filteredSubs.map(sub => {
-          const stu = students.find(s => s.id === sub.studentId); const asg = assignments.find(a => a.id === sub.assignmentId);
-          const isLate = sub.submittedAtISO && asg?.dueDate ? new Date(sub.submittedAtISO) > new Date(asg.dueDate + 'T23:59:59') : false;
-          
-          return (
-            <div key={sub.id} className={`flex flex-col lg:flex-row lg:items-center justify-between p-5 rounded-2xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              <div className="flex items-start gap-4">
-                 <div className={`w-12 h-12 rounded-full overflow-hidden shrink-0 border flex items-center justify-center ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-100 border-slate-200'}`}>
-                   {stu?.profileImg ? <img src={getValidImgUrl(stu.profileImg)} className="w-full h-full object-cover rounded-full"/> : <User size={20} className="text-slate-400"/>}
+    <div className="max-w-6xl mx-auto space-y-6">
+       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+         <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3 shrink-0"><CheckSquare className="mr-2 text-blue-500"/> ตรวจงาน (คะแนนเก็บ)</h2>
+         <div className="flex flex-wrap gap-2 w-full xl:w-auto items-center">
+           <div className="relative flex-1 min-w-[200px]">
+             <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} size={18} />
+             <input type="text" placeholder="ค้นหาชื่อ หรือ รหัสนักเรียน..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className={`w-full pl-10 pr-4 py-3 rounded-xl font-bold outline-none border focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} />
+           </div>
+         </div>
+       </div>
+
+       <div className={`p-4 rounded-2xl flex flex-wrap gap-3 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+         <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterAsg('all'); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}>
+           {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+         </select>
+         <select value={filterAsg} onChange={e => setFilterAsg(e.target.value)} className={selectClass}>
+           <option value="all">-- ตรวจทุกงาน --</option>
+           {targetAsgs.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+         </select>
+         <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}>
+           <option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}
+         </select>
+         <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass}>
+           <option value="all">ทุกตอน</option>{dynamicSections.map(s => <option key={s} value={s}>ตอน {s}</option>)}
+         </select>
+       </div>
+
+       <div className="grid grid-cols-1 gap-4">
+         {targetSubms.map(subm => {
+            const asg = assignments.find(a => a.id === subm.assignmentId);
+            const stu = students.find(s => String(s.id) === String(subm.studentId));
+            const isBase64 = subm.fileUrl && subm.fileUrl.startsWith('data:');
+
+            return (
+              <div key={subm.id} className={`p-6 rounded-3xl shadow-sm border flex flex-col md:flex-row justify-between items-center gap-4 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                 <div className="flex-1 w-full">
+                    <h4 className="font-black text-lg text-blue-600 dark:text-blue-400">{asg?.title}</h4>
+                    <p className={`text-sm font-bold mt-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>นักเรียน: {stu ? `${stu.name} (ห้อง ${stu.room} ตอน ${stu.section || '-'})` : 'ไม่ระบุ'} (รหัส: {subm.studentId})</p>
+                    <p className={`text-xs mt-2 flex items-center ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {subm.type === 'link' ? <LinkIcon size={14} className="mr-1"/> : <FileText size={14} className="mr-1"/>}
+                      ส่งเมื่อ: {subm.submittedAt} ({subm.type === 'link' ? 'ส่งแบบลิงก์' : isBase64 ? 'ส่งไฟล์เข้าระบบ' : 'ส่งแบบไฟล์'})
+                    </p>
                  </div>
-                 <div>
-                   <div className="flex flex-wrap items-center gap-2 mb-1"><span className="font-mono text-blue-500 font-bold">{stu?.id}</span><span className="font-black">{stu?.name}</span><span className={`text-xs px-2 py-0.5 rounded font-bold border ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>ห้อง {stu?.room} {stu?.section ? `(${stu.section})` : ''}</span></div>
-                   <div className={`text-sm font-bold flex flex-wrap gap-2 items-center ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                      <span>{asg?.title}</span> <span className="text-slate-500 font-medium ml-1">(เต็ม {asg?.maxScore})</span>
-                      {isLate && <span className="text-xs text-white bg-red-500 px-2 py-1 rounded ml-2 font-bold animate-pulse inline-flex items-center"><AlertCircle size={12} className="mr-1"/> ส่งช้า</span>}
+                 <div className="flex items-center gap-3 w-full md:w-auto mt-4 md:mt-0 shrink-0">
+                    {isBase64 ? (
+                      <button onClick={() => handleDownloadLegacyBase64(subm.fileUrl, stu?.name)} className={`flex-1 md:flex-none text-center px-5 py-2.5 font-bold rounded-xl transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-blue-50 hover:bg-blue-100 text-blue-700'}`}>
+                         ดาวน์โหลดไฟล์
+                      </button>
+                    ) : (
+                      <a href={subm.fileUrl} target="_blank" rel="noreferrer" className={`flex-1 md:flex-none text-center px-5 py-2.5 font-bold rounded-xl transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-blue-50 hover:bg-blue-100 text-blue-700'}`}>
+                         เปิดดูผลงาน
+                      </a>
+                    )}
+                    <button onClick={() => { setSelectedSubm(subm); setScoreForm({ score: asg?.maxScore || 10, penalty: 0 }); }} className="flex-1 md:flex-none px-5 py-2.5 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-600 shadow-md">
+                       ตรวจให้คะแนน
+                    </button>
+                 </div>
+              </div>
+            )
+         })}
+         {targetSubms.length === 0 && <div className={`text-center py-16 rounded-3xl border font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีงานรอตรวจตามเงื่อนไขที่ค้นหา</div>}
+       </div>
+
+       {selectedSubm && (
+         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
+           <div className={`rounded-3xl w-full max-w-md p-8 shadow-2xl relative border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+             <button onClick={() => !isSaving && setSelectedSubm(null)} disabled={isSaving} className={`absolute top-5 right-5 p-2 rounded-full ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-slate-100 text-slate-500'}`}><X size={20}/></button>
+             <h3 className="text-2xl font-black mb-6">ให้คะแนน</h3>
+             <form onSubmit={handleSaveGrade} className="space-y-4">
+                <div>
+                   <label className="block text-sm font-bold mb-2">คะแนนที่ได้</label>
+                   <input type="number" required min="0" max={assignments.find(a => a.id === selectedSubm.assignmentId)?.maxScore || 100} value={scoreForm.score} onChange={e => setScoreForm({...scoreForm, score: e.target.value})} className={`w-full p-4 rounded-2xl font-black text-2xl text-center outline-none border focus:ring-2 focus:ring-blue-500 shadow-inner ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`} />
+                </div>
+                <div>
+                   <label className="block text-sm font-bold mb-2 text-red-500">หักคะแนน (ถ้ามี)</label>
+                   <input type="number" min="0" value={scoreForm.penalty} onChange={e => setScoreForm({...scoreForm, penalty: e.target.value})} className={`w-full p-3 rounded-xl font-bold text-center outline-none border focus:ring-2 focus:ring-red-500 shadow-inner ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`} />
+                </div>
+                <div className={`pt-6 mt-4 border-t ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                   <div className="flex justify-between items-center mb-6">
+                      <span className={`font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>คะแนนสุทธิ</span>
+                      <span className="text-4xl font-black text-emerald-500">{Math.max(0, Number(scoreForm.score) - Number(scoreForm.penalty))}</span>
                    </div>
-                 </div>
-              </div>
-              <div className="flex flex-col lg:flex-row items-center justify-end gap-3 mt-4 lg:mt-0 w-full lg:w-auto">
-                <a href={sub.fileUrl.startsWith('http') ? sub.fileUrl : `https://${sub.fileUrl}`} target="_blank" rel="noreferrer" className={`font-bold text-sm px-4 py-3 rounded-xl whitespace-nowrap flex items-center shadow-sm border transition-colors ${isDark ? 'bg-slate-900 hover:bg-slate-700 text-blue-400 border-slate-700' : 'bg-white hover:bg-blue-50 text-blue-600 border-slate-200'}`}>
-                  {sub.type === 'link' ? <ExternalLink size={16} className="mr-2"/> : <DownloadCloud size={16} className="mr-2"/>} 
-                  {sub.type === 'link' ? 'เปิดลิงก์ผลงาน' : 'โหลดไฟล์ผลงาน'}
-                </a>
-                
-                {sub.status === 'graded' ? (
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      <div className="text-green-500 font-black bg-green-500/10 border border-green-500/20 px-5 py-2.5 rounded-xl">{sub.score} / {asg?.maxScore}</div>
-                      {sub.penalty > 0 && <div className="text-xs font-bold text-red-500 mt-1">ถูกหักส่งช้า -{sub.penalty}</div>}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <button onClick={() => handleEditGrade(sub.id)} className={`p-2 rounded-lg text-amber-500 transition-colors ${isDark ? 'bg-amber-900/30 hover:bg-amber-900/50' : 'bg-amber-50 hover:bg-amber-100'}`} title="แก้ไขคะแนนใหม่"><Edit size={16}/></button>
-                      <button onClick={() => handleRejectSubmission(sub.id)} className={`p-2 rounded-lg text-red-500 transition-colors ${isDark ? 'bg-red-900/30 hover:bg-red-900/50' : 'bg-red-50 hover:bg-red-100'}`} title="ตีกลับ / ยกเลิกการส่ง"><Trash2 size={16}/></button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div className={`flex flex-col gap-2 p-3 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                      <div className="flex items-center gap-2">
-                        <input type="number" id={`score-${sub.id}`} className={`w-20 rounded-lg px-2 py-2 text-center font-bold outline-none border ${isDark ? 'bg-slate-800 border-slate-600 text-white focus:border-blue-500' : 'bg-white border-slate-300 focus:border-blue-500'}`} placeholder="คะแนน" />
-                        <span className="text-slate-500 font-bold w-12">/ {asg?.maxScore}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input type="number" id={`penalty-${sub.id}`} className={`w-20 rounded-lg px-2 py-2 text-center font-bold outline-none border ${isDark ? 'bg-slate-800 border-slate-600 text-red-400 focus:border-red-500' : 'bg-white border-red-200 text-red-600 focus:border-red-500'}`} placeholder="หักส่งช้า" defaultValue={isLate ? "1" : "0"} />
-                        <button onClick={() => handleGrade(sub.id, asg?.maxScore)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold flex-1">บันทึก</button>
-                      </div>
-                    </div>
-                    <button onClick={() => handleRejectSubmission(sub.id)} className={`p-3 rounded-xl text-red-500 transition-colors h-full border ${isDark ? 'bg-slate-900 border-slate-700 hover:bg-red-900/30' : 'bg-slate-50 border-slate-200 hover:bg-red-50'}`} title="ตีกลับ / ยกเลิกการส่งเพื่อให้นักเรียนส่งใหม่"><Trash2 size={20}/></button>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {filteredSubs.length === 0 && <div className="text-center text-slate-500 py-16 font-bold">ไม่พบงานตามเงื่อนไขที่เลือก</div>}
-      </div>
+                   <button type="submit" disabled={isSaving} className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg rounded-2xl shadow-md flex justify-center items-center transition-colors">
+                      {isSaving ? <><RefreshCw size={20} className="mr-2 animate-spin"/> กำลังบันทึก...</> : 'บันทึกคะแนน'}
+                   </button>
+                </div>
+             </form>
+           </div>
+         </div>
+       )}
     </div>
   );
 }
 
-function TeacherExams({ subjects, students, enrollments, exams, setExams, showToast, theme, getUniqueRooms, getUniqueSections }) {
+function TeacherExams({ subjects, students, enrollments, exams, saveState, showToast, theme }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSection, setFilterSection] = useState('all');
   const [examType, setExamType] = useState('midterm');
   const isDark = theme === 'dark';
 
-  const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
-  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = getUniqueRooms();
-  const dynamicSections = getUniqueSections(filterRoom);
+  const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId));
+  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id)));
+  const dynamicRooms = [...new Set(enrolledSts.map(s => s.room))].filter(Boolean).sort();
+  const dynamicSections = [...new Set(enrolledSts.filter(s => filterRoom === 'all' || String(s.room) === String(filterRoom)).map(s => String(s.section || '')))].filter(s => s && s !== '-').sort();
   
-  const targetStudents = enrolledSts
-       .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
-       .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
+  const targetStudents = enrolledSts.filter(s => 
+    (filterRoom === 'all' || String(s.room) === String(filterRoom)) &&
+    (filterSection === 'all' || String(s.section || '') === String(filterSection))
+  );
 
   const subObj = subjects.find(s => s.id === filterSub);
-  const maxScore = examType === 'midterm' ? (subObj?.midtermMax ?? 20) : (subObj?.finalMax ?? 30);
+  const maxScore = examType === 'midterm' ? (subObj?.midtermMax || 20) : (subObj?.finalMax || 30);
   const examLabel = examType === 'midterm' ? 'กลางภาค' : 'ปลายภาค';
 
-  const getExamRecord = (studentId) => exams.find(e => String(e.studentId).trim() === String(studentId).trim() && String(e.subjectId).trim() === String(filterSub).trim()) || { midterm: '', final: '' };
+  const getExamRecord = (studentId) => exams.find(e => String(e.studentId) === String(studentId) && e.subjectId === filterSub) || { midterm: '', final: '' };
 
   const handleBatchSave = () => {
      let updatedExams = [...exams];
@@ -1893,7 +1918,7 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
         const scoreVal = parseFloat(inputEl.value);
         if (isNaN(scoreVal)) return;
 
-        const existingIdx = updatedExams.findIndex(e => String(e.studentId).trim() === String(s.id).trim() && String(e.subjectId).trim() === String(filterSub).trim());
+        const existingIdx = updatedExams.findIndex(e => String(e.studentId) === String(s.id) && e.subjectId === filterSub);
         
         if (existingIdx >= 0) {
            updatedExams[existingIdx] = { ...updatedExams[existingIdx], [examType]: scoreVal };
@@ -1901,7 +1926,7 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
            updatedExams.push({ 
              id: `ex${Date.now()}_${s.id}_${Math.random()}`, 
              subjectId: filterSub, 
-             studentId: s.id, 
+             studentId: String(s.id), 
              midterm: examType === 'midterm' ? scoreVal : 0, 
              final: examType === 'final' ? scoreVal : 0 
            });
@@ -1910,8 +1935,8 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
      });
 
      if(hasChanges) {
-        setExams(updatedExams);
-        showToast(`บันทึกคะแนน ${examLabel} ของทั้งห้องสำเร็จ`);
+        saveState({ exams: updatedExams });
+        showToast(`บันทึกและซิงค์คะแนน ${examLabel} ของทั้งห้องสำเร็จ`);
      } else {
         showToast(`ไม่มีข้อมูลคะแนนใหม่ให้บันทึก`);
      }
@@ -1924,21 +1949,20 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
        <div className={`p-6 rounded-3xl flex gap-4 shadow-sm items-end flex-wrap border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="flex-1 min-w-[200px]"><label className="block text-sm font-bold mb-2">วิชา</label><select value={filterSub} onChange={e=>{setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
           <div><label className="block text-sm font-bold mb-2">ห้อง</label><select value={filterRoom} onChange={e=>{setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r=><option key={r} value={r}>ห้อง {r}</option>)}</select></div>
-          <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={filterSection} onChange={e=>setFilterSection(e.target.value)} className={selectClass} disabled={filterRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
+          <div><label className="block text-sm font-bold mb-2">ตอน</label><select value={filterSection} onChange={e=>setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(s=><option key={s} value={s}>ตอน {s}</option>)}</select></div>
        </div>
 
        <div className={`rounded-3xl overflow-hidden shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-         
          <div className={`p-5 border-b flex flex-col md:flex-row justify-between items-center gap-4 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
             <div className={`flex rounded-xl p-1.5 w-full md:w-auto ${isDark ? 'bg-slate-900' : 'bg-slate-200/60'}`}>
               <button onClick={() => setExamType('midterm')} className={`flex-1 md:flex-none px-6 py-2 rounded-lg text-sm font-bold transition-all ${examType === 'midterm' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}>สอบกลางภาค</button>
               <button onClick={() => setExamType('final')} className={`flex-1 md:flex-none px-6 py-2 rounded-lg text-sm font-bold transition-all ${examType === 'final' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}>สอบปลายภาค</button>
             </div>
-            <button onClick={handleBatchSave} className="flex items-center px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md w-full md:w-auto justify-center transition-all"><Save size={18} className="mr-2" /> บันทึกคะแนนทั้งห้อง</button>
+            <button onClick={handleBatchSave} className="flex items-center px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md w-full md:w-auto justify-center transition-all"><Save size={18} className="mr-2" /> บันทึกและซิงค์คะแนน</button>
          </div>
 
          <div className="overflow-x-auto">
-           <table className="w-full text-left text-sm min-w-[600px]">
+           <table className="w-full text-left text-sm min-w-[700px]">
              <thead className={`font-bold border-b ${isDark ? 'bg-slate-900/50 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
                <tr>
                  <th className="p-4 w-16 text-center">ห้อง</th>
@@ -1975,44 +1999,43 @@ function TeacherExams({ subjects, students, enrollments, exams, setExams, showTo
   );
 }
 
-function TeacherSummary({ subjects, students, assignments, submissions, exams, behaviors, enrollments, showToast, theme, getUniqueRooms, getUniqueSections }) {
+function TeacherSummary({ subjects, students, assignments, submissions, exams, behaviors, enrollments, showToast, theme }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterSection, setFilterSection] = useState('all');
   const isDark = theme === 'dark';
 
   const subObj = subjects.find(s => s.id === filterSub);
-  const maxMid = getSafeNum(subObj?.midtermMax, 20);
-  const maxFin = getSafeNum(subObj?.finalMax, 30);
+  const maxMid = subObj?.midtermMax || 20;
+  const maxFin = subObj?.finalMax || 30;
 
   const targetAsgs = assignments.filter(a => a.subjectId === filterSub);
-  const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId).trim());
-  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id).trim()));
-  const dynamicRooms = getUniqueRooms();
-  const dynamicSections = getUniqueSections(filterRoom);
+  const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId));
+  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id)));
+  const dynamicRooms = [...new Set(enrolledSts.map(s => s.room))].filter(Boolean).sort();
+  const dynamicSections = [...new Set(enrolledSts.filter(s => filterRoom === 'all' || String(s.room) === String(filterRoom)).map(s => String(s.section || '')))].filter(s => s && s !== '-').sort();
   
-  const targetSts = enrolledSts
-      .filter(s => filterRoom === 'all' || String(s.room || '').trim() === String(filterRoom).trim())
-      .filter(s => filterSection === 'all' || String(s.section || '').trim() === String(filterSection).trim());
+  const targetSts = enrolledSts.filter(s => 
+    (filterRoom === 'all' || String(s.room) === String(filterRoom)) &&
+    (filterSection === 'all' || String(s.section || '') === String(filterSection))
+  );
 
   const matrix = targetSts.map(stu => {
     let asgTotal = 0;
     const scores = targetAsgs.reduce((acc, asg) => {
-      const sub = submissions.find(s => String(s.studentId).trim() === String(stu.id).trim() && s.assignmentId === asg.id);
-      const score = (sub && sub.status === 'graded') ? getSafeNum(sub.score, 0) : 0;
+      const sub = submissions.find(s => String(s.studentId) === String(stu.id) && s.assignmentId === asg.id);
+      const score = (sub && sub.status === 'graded') ? sub.score : 0;
       asgTotal += score; acc[asg.id] = score; return acc;
     }, {});
     
-    const examRec = exams.find(e => String(e.studentId).trim() === String(stu.id).trim() && e.subjectId === filterSub) || {};
-    const behaviorTotal = behaviors.filter(b => b.subjectId === filterSub && String(b.studentId).trim() === String(stu.id).trim()).reduce((sum, b) => sum + getSafeNum(b.points, 0), 0);
-    const mid = getSafeNum(examRec.midterm, 0);
-    const fin = getSafeNum(examRec.final, 0);
-    const grandTotal = asgTotal + mid + fin;
+    const examRec = exams.find(e => String(e.studentId) === String(stu.id) && e.subjectId === filterSub) || { midterm: 0, final: 0 };
+    const behaviorTotal = behaviors.filter(b => b.subjectId === filterSub && String(b.studentId) === String(stu.id)).reduce((sum, b) => sum + b.points, 0);
+    const grandTotal = asgTotal + (examRec.midterm || 0) + (examRec.final || 0);
 
-    return { ...stu, scores, asgTotal, mid, fin, behaviorTotal, grandTotal };
+    return { ...stu, scores, asgTotal, mid: examRec.midterm || 0, fin: examRec.final || 0, behaviorTotal, grandTotal };
   });
 
-  const maxAsgTotal = targetAsgs.reduce((sum, asg) => sum + getSafeNum(asg.maxScore, 0), 0);
+  const maxAsgTotal = targetAsgs.reduce((sum, asg) => sum + asg.maxScore, 0);
   const maxGrandTotal = maxAsgTotal + maxMid + maxFin;
 
   const handleExport = () => {
@@ -2023,7 +2046,7 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
     csv += `รวมงาน (${maxAsgTotal}),กลางภาค (${maxMid}),ปลายภาค (${maxFin}),รวมสุทธิ (${maxGrandTotal}),พฤติกรรม\n`;
 
     matrix.forEach(row => {
-      csv += `="${row.room}","${row.section || ''}",${row.number},="${row.id}","${row.name}",`;
+      csv += `${row.room},${row.section || '-'},${row.number},="${row.id}","${row.name}",`;
       targetAsgs.forEach(a => csv += `${row.scores[a.id]},`);
       csv += `${row.asgTotal},${row.mid},${row.fin},${row.grandTotal},${row.behaviorTotal}\n`;
     });
@@ -2042,7 +2065,7 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
          <div className="flex gap-4 w-full md:w-auto">
            <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}><option value="">-- เลือกวิชา --</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
            <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
-           <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass} disabled={filterRoom === 'all'}><option value="all">ทุกตอน</option>{dynamicSections.map(s => <option key={s} value={s}>ตอน {s}</option>)}</select>
+           <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(s => <option key={s} value={s}>ตอน {s}</option>)}</select>
          </div>
          <button onClick={handleExport} className="flex items-center px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md w-full md:w-auto justify-center transition-colors"><DownloadCloud size={18} className="mr-2" /> ส่งออก Excel</button>
       </div>
@@ -2051,41 +2074,37 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
           <table className="w-full text-left text-sm min-w-max border-collapse">
             <thead className={`font-bold sticky top-0 z-10 border-b shadow-sm ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
               <tr>
-                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ห้อง</th>
-                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ตอน</th>
-                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">เลขที่</th>
-                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">รหัส</th>
-                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ชื่อ-สกุล</th>
-                {targetAsgs.map(a => <th key={a.id} className={`p-4 text-center border-r text-xs whitespace-nowrap ${isDark ? 'border-slate-700 bg-blue-900/20 text-blue-400' : 'border-slate-200 bg-blue-50 text-blue-700'}`} rowSpan="2">{a.title}<br/><span className={`font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>(เต็ม {a.maxScore})</span></th>)}
-                {targetAsgs.length === 0 && <th className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ไม่มีงาน</th>}
-                <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-emerald-900/20 text-emerald-400' : 'border-slate-200 bg-emerald-50 text-emerald-700'}`} colSpan="4">สรุปคะแนน (เต็ม {maxGrandTotal})</th>
-                <th className={`p-4 text-center border-r ${isDark ? 'border-slate-700 bg-violet-900/20 text-violet-400' : 'border-slate-200 bg-violet-50 text-violet-700'}`} rowSpan="2">พฤติกรรม</th>
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ห้อง</th>
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">ตอน</th>
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">เลขที่</th>
+                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`} rowSpan="2">รหัส / ชื่อ-สกุล</th>
+                <th className={`p-2 text-center border-r border-b ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`} colSpan={targetAsgs.length || 1}>คะแนนเก็บ (งาน)</th>
+                <th className={`p-2 text-center border-r border-b ${isDark ? 'border-slate-700 bg-amber-900/20 text-amber-500' : 'border-slate-200 bg-amber-50 text-amber-700'}`} colSpan="2">คะแนนสอบ</th>
+                <th className={`p-4 text-center border-r ${isDark ? 'border-slate-700 bg-slate-900/80 text-white' : 'border-slate-200 bg-slate-100 text-slate-800'}`} rowSpan="2">รวมสุทธิ<br/><span className="text-xs font-normal">(เต็ม {maxGrandTotal})</span></th>
+                <th className={`p-4 text-center ${isDark ? 'bg-green-900/20 text-green-400' : 'bg-green-50 text-green-700'}`} rowSpan="2">พฤติกรรม<br/><span className="text-xs font-normal">(พิเศษ)</span></th>
               </tr>
               <tr>
-                <th className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รวมงาน<br/>({maxAsgTotal})</th>
-                <th className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>กลางภาค<br/>({maxMid})</th>
-                <th className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ปลายภาค<br/>({maxFin})</th>
-                <th className={`p-2 text-center border-r text-xs font-black ${isDark ? 'border-slate-700 text-emerald-400' : 'border-slate-200 text-emerald-600'}`}>รวมสุทธิ</th>
+                {targetAsgs.length === 0 && <th className={`p-2 text-center border-r ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`}>-</th>}
+                {targetAsgs.map(a => <th key={a.id} className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700 bg-blue-900/20' : 'border-slate-200 bg-blue-50/50'}`}><div className="truncate w-20 mx-auto" title={a.title}>{a.title}</div><div className="text-blue-500 mt-1 font-bold">เต็ม {a.maxScore}</div></th>)}
+                <th className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700 bg-amber-900/20 text-amber-400' : 'border-slate-200 bg-amber-50 text-amber-600'}`}>กลางภาค ({maxMid})</th>
+                <th className={`p-2 text-center border-r text-xs ${isDark ? 'border-slate-700 bg-amber-900/20 text-amber-400' : 'border-slate-200 bg-amber-50 text-amber-600'}`}>ปลายภาค ({maxFin})</th>
               </tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
-              {matrix.map(row => (
+              {matrix.map((row) => (
                 <tr key={row.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-blue-50/40'}`}>
-                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>{row.room}</td>
-                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'}`}>{row.section || '-'}</td>
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.room}</td>
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.section || '-'}</td>
                   <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.number}</td>
-                  <td className={`p-4 font-mono font-bold text-blue-500 border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.id}</td>
-                  <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.name}</td>
-                  {targetAsgs.map(a => <td key={a.id} className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.scores[a.id]}</td>)}
-                  {targetAsgs.length === 0 && <td className={`p-4 text-center border-r text-slate-400 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>-</td>}
-                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.asgTotal}</td>
-                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.mid}</td>
-                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.fin}</td>
-                  <td className={`p-4 text-center font-black text-emerald-500 border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.grandTotal}</td>
-                  <td className={`p-4 text-center font-bold ${row.behaviorTotal > 0 ? 'text-emerald-500' : row.behaviorTotal < 0 ? 'text-red-500' : (isDark ? 'text-slate-400' : 'text-slate-500')}`}>{row.behaviorTotal > 0 ? `+${row.behaviorTotal}` : row.behaviorTotal}</td>
+                  <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><span className="text-blue-500 mr-2 font-mono">{row.id}</span>{row.name}</td>
+                  {targetAsgs.length === 0 && <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>-</td>}
+                  {targetAsgs.map(a => <td key={a.id} className={`p-4 text-center font-black border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.scores[a.id] > 0 ? <span className="text-emerald-500">{row.scores[a.id]}</span> : <span className="text-slate-500">-</span>}</td>)}
+                  <td className={`p-4 text-center font-black text-amber-500 border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.mid > 0 ? row.mid : '-'}</td>
+                  <td className={`p-4 text-center font-black text-amber-500 border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.fin > 0 ? row.fin : '-'}</td>
+                  <td className={`p-4 text-center font-black text-blue-500 text-lg border-r shadow-[-2px_0_5px_rgba(0,0,0,0.02)] sticky right-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>{row.grandTotal}</td>
+                  <td className="p-4 text-center font-black text-lg"><span className={row.behaviorTotal > 0 ? 'text-green-500' : row.behaviorTotal < 0 ? 'text-red-500' : 'text-slate-500'}>{row.behaviorTotal > 0 ? `+${row.behaviorTotal}` : row.behaviorTotal}</span></td>
                 </tr>
               ))}
-              {matrix.length === 0 && <tr><td colSpan={12 + targetAsgs.length} className="text-center p-8 font-bold text-slate-500">ไม่พบนักเรียนในวิชาและห้องนี้</td></tr>}
             </tbody>
           </table>
         </div>
@@ -2094,89 +2113,122 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
   );
 }
 
-function TeacherProfile({ teacherProfile, setTeacherProfile, dbUrl, setDbUrl, theme, setTheme, showToast }) {
+function TeacherProfile({ teacherProfile, saveState, dbUrl, setDbUrl, showToast, theme, setTheme }) {
+  const [form, setForm] = useState({ name: teacherProfile.name, password: teacherProfile.password, confirm: teacherProfile.password });
+  const [urlInput, setUrlInput] = useState(dbUrl);
+  const [profileImg, setProfileImg] = useState(teacherProfile.profileImg);
+  const [isUploading, setIsUploading] = useState(false);
   const isDark = theme === 'dark';
-  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
-
-  const [form, setForm] = useState(teacherProfile);
-  const [dbInput, setDbInput] = useState(dbUrl || '');
-
-  const handleSaveProfile = (e) => {
-    e.preventDefault();
-    setTeacherProfile(form);
-    showToast('บันทึกโปรไฟล์ส่วนตัวเรียบร้อย');
-  };
-
-  const handleSaveDb = (e) => {
-    e.preventDefault();
-    setDbUrl(dbInput);
-    showToast('บันทึกการตั้งค่าฐานข้อมูลเรียบร้อย');
-  };
 
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const resized = await resizeImage(file);
-      setForm({ ...form, profileImg: resized });
+    if(!file) return;
+
+    if (!dbUrl) return showToast('กรุณาตั้งค่า Database URL (เชื่อมต่อ Google Sheets) ก่อนอัปโหลดรูปภาพ');
+
+    setIsUploading(true);
+    showToast('กำลังลดขนาดและอัปโหลดรูปภาพ...');
+    
+    try {
+      const base64DataUrl = await resizeImage(file);
+      const base64 = base64DataUrl.split(',')[1];
+
+      const payload = { 
+        action: 'uploadFile', 
+        type: 'profile',
+        filename: `TeacherProfile_${Date.now()}.jpg`, 
+        mimeType: 'image/jpeg', 
+        fileData: base64 
+      };
+      
+      const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      
+      if (data.url) {
+        setProfileImg(data.url);
+        saveState({ teacherProfile: { ...teacherProfile, profileImg: data.url } });
+        showToast('อัปเดตรูปประจำตัวสำเร็จแล้ว');
+      } else {
+        throw new Error('Upload failed');
+      }
+    } catch (err) {
+      showToast('เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
     }
+    setIsUploading(false);
   };
 
+  const handleSaveProfile = (e) => {
+    e.preventDefault();
+    if(form.password !== form.confirm) return showToast('รหัสผ่านไม่ตรงกัน');
+    saveState({ teacherProfile: { ...teacherProfile, name: form.name, password: form.password } });
+    showToast('อัปเดตข้อมูลแอดมินสำเร็จ');
+  }
+
+  const handleSaveDb = async (e) => {
+    e.preventDefault();
+    if (!urlInput.includes('/exec')) return showToast('URL ไม่ถูกต้อง (ต้องลงท้ายด้วย /exec)');
+    
+    showToast('กำลังทดสอบการเชื่อมต่อ...');
+    try {
+      const res = await fetch(urlInput);
+      const rawData = await res.text();
+      
+      if (rawData.trim().startsWith('<')) {
+        return showToast('การเชื่อมต่อถูกปฏิเสธ: โปรดตรวจสอบว่าตั้งค่าสิทธิ์ Anyone (ทุกคน) หรือยัง');
+      }
+      
+      setDbUrl(urlInput);
+      safeSetItem('kasem_db_url', urlInput);
+      showToast('เชื่อมต่อสำเร็จ! ระบบจะจดจำ URL นี้ไว้ให้');
+      setTimeout(() => window.location.reload(), 1500); 
+    } catch (err) {
+      showToast('URL ไม่ถูกต้อง หรือไม่สามารถเชื่อมต่อได้');
+    }
+  }
+
+  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* Profile Settings */}
-        <div className={`p-6 md:p-8 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <h2 className="text-xl font-black mb-6 flex items-center border-l-4 border-blue-500 pl-3"><Settings className="mr-2 text-blue-500"/> ตั้งค่าโปรไฟล์ผู้สอน</h2>
-          <form onSubmit={handleSaveProfile} className="space-y-5">
-            <div className="flex flex-col items-center mb-6 relative">
-              <div className={`w-32 h-32 rounded-full overflow-hidden mb-3 border-4 shadow-md ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
-                {form.profileImg ? <img src={getValidImgUrl(form.profileImg)} className="w-full h-full object-cover" /> : <User size={48} className="w-full h-full p-6 text-slate-300" />}
-              </div>
-              <label className="cursor-pointer bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900 px-4 py-2 rounded-full text-sm font-bold flex items-center transition-colors">
-                <Camera size={16} className="mr-2"/> เปลี่ยนรูป
-                <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
-              </label>
-            </div>
-            <div><label className="block text-sm font-bold mb-2">ชื่อผู้สอน</label><input required type="text" value={form.name} onChange={e=>setForm({...form, name: e.target.value})} className={inputClass} /></div>
-            <div><label className="block text-sm font-bold mb-2">รหัสผ่านสำหรับเข้าสู่ระบบแอดมิน</label><input required type="password" value={form.password} onChange={e=>setForm({...form, password: e.target.value})} className={inputClass} /></div>
-            <button type="submit" className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-colors">บันทึกโปรไฟล์</button>
-          </form>
-        </div>
+     <div className="max-w-4xl mx-auto space-y-8 pb-10">
+       <div className={`border rounded-3xl p-6 shadow-sm flex items-center justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+         <div><h3 className="text-xl font-black mb-1 flex items-center"><Moon className="mr-3 text-blue-500"/> รูปแบบหน้าจอ (Theme)</h3><p className={`text-sm font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>ปรับโทนสีสว่าง/มืดตามอุปกรณ์</p></div>
+         <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className={`p-4 rounded-full font-bold shadow-md transition-all ${isDark ? 'bg-amber-400 text-slate-900' : 'bg-slate-800 text-white'}`}>{theme === 'dark' ? <Sun size={24}/> : <Moon size={24}/>}</button>
+       </div>
 
-        {/* System Settings */}
-        <div className="space-y-6">
-          <div className={`p-6 md:p-8 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-             <h2 className="text-xl font-black mb-6 flex items-center border-l-4 border-emerald-500 pl-3"><Cloud className="mr-2 text-emerald-500"/> ตั้งค่าฐานข้อมูล (Google Apps Script)</h2>
-             <form onSubmit={handleSaveDb} className="space-y-5">
-               <div>
-                  <label className="block text-sm font-bold mb-2 text-slate-500">Web App URL</label>
-                  <input type="text" value={dbInput} onChange={e=>setDbInput(e.target.value)} className={inputClass} placeholder="https://script.google.com/macros/s/.../exec" />
+       <div className={`border rounded-3xl p-6 md:p-8 shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+         <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><Cloud className="mr-3 text-blue-500"/> ฐานข้อมูล (Google Sheets)</h3>
+         <form onSubmit={handleSaveDb} className="flex flex-col md:flex-row gap-4">
+            <input type="text" value={urlInput} onChange={e => setUrlInput(e.target.value)} placeholder="วางลิงก์ Web App URL จาก Google Apps Script (ลงท้ายด้วย /exec)" className={inputClass} />
+            <button type="submit" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md whitespace-nowrap">บันทึก & ซิงค์</button>
+         </form>
+       </div>
+
+       <div className={`border rounded-3xl p-6 md:p-8 shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+         <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><Settings className="mr-3 text-blue-500"/> โปรไฟล์และการตั้งค่าแอดมิน</h3>
+         <div className="flex flex-col md:flex-row gap-8">
+            <div className="shrink-0 flex flex-col items-center">
+               <div className={`w-32 h-32 rounded-full border-4 shadow-lg relative group overflow-hidden flex justify-center items-center ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-100 border-white'}`}>
+                  {profileImg ? <img src={getValidImgUrl(profileImg)} className="w-full h-full object-cover rounded-full" /> : <User size={48} className="text-slate-400"/>}
+                  <div className={`absolute inset-0 bg-black/50 flex items-center justify-center transition-opacity cursor-pointer ${isUploading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    {isUploading ? <RefreshCw className="text-white animate-spin" size={32} /> : <Camera className="text-white" size={32} />}
+                    {!isUploading && <input type="file" accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer"/>}
+                  </div>
                </div>
-               <button type="submit" className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md transition-colors">บันทึก URL ฐานข้อมูล</button>
-               <p className={`text-xs mt-3 p-3 rounded-lg border ${isDark ? 'bg-amber-900/20 text-amber-400 border-amber-900/50' : 'bg-amber-50 text-amber-700 border-amber-200'}`}><AlertCircle size={14} className="inline mr-1"/> หมายเหตุ: หากเว้นว่างไว้ ระบบจะทำงานแบบ Offline (ข้อมูลเซฟแค่ในเครื่องนี้เท่านั้น)</p>
-             </form>
-          </div>
-
-          <div className={`p-6 rounded-3xl shadow-sm border flex items-center justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-             <div>
-                <h3 className="font-black text-lg mb-1">โหมดการแสดงผล</h3>
-                <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>ปรับเปลี่ยนธีมสว่าง / มืด</p>
-             </div>
-             <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className={`p-4 rounded-2xl transition-all shadow-inner ${isDark ? 'bg-slate-900 text-blue-400 border border-slate-700' : 'bg-slate-100 text-amber-500 border border-slate-200'}`}>
-                {theme === 'dark' ? <Moon size={24} /> : <Sun size={24} />}
-             </button>
-          </div>
-        </div>
-
-      </div>
-    </div>
+               <span className="text-xs font-bold text-slate-400 mt-3">คลิกที่รูปเพื่อเปลี่ยน</span>
+            </div>
+            <form onSubmit={handleSaveProfile} className="flex-1 space-y-5">
+               <div><label className="block text-sm font-bold mb-2">ชื่อผู้สอน (แสดงผล)</label><input required type="text" value={form.name} onChange={e=>setForm({...form, name: e.target.value})} className={inputClass} /></div>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div><label className="block text-sm font-bold mb-2">รหัสผ่าน</label><input type="password" value={form.password} onChange={e=>setForm({...form, password: e.target.value})} className={inputClass} /></div>
+                  <div><label className="block text-sm font-bold mb-2">ยืนยันรหัสผ่าน</label><input type="password" value={form.confirm} onChange={e=>setForm({...form, confirm: e.target.value})} className={inputClass} /></div>
+               </div>
+               <div className="pt-2 flex justify-end"><button type="submit" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md">บันทึกข้อมูล</button></div>
+            </form>
+         </div>
+       </div>
+     </div>
   );
 }
-
-// ==========================================
-// STUDENT VIEWS
-// ==========================================
 
 function StudentView(props) {
   switch(props.activeTab) {
@@ -2193,431 +2245,530 @@ function StudentView(props) {
 
 function StudentDashboard({ student, subjects, assignments, submissions, setActiveTab, theme }) {
   const isDark = theme === 'dark';
-  const pendingAsgs = assignments.filter(a => 
-    (!a.targetRoom || a.targetRoom === 'all' || String(a.targetRoom).trim() === String(student.room).trim()) &&
-    !submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim())
-  );
+  const pendingAsgs = assignments.filter(a => !submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim()));
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div className={`p-6 md:p-8 rounded-3xl shadow-sm text-white overflow-hidden relative ${isDark ? 'bg-gradient-to-br from-blue-900 to-indigo-900' : 'bg-gradient-to-br from-blue-600 to-indigo-700'}`}>
-        <div className="absolute top-0 right-0 p-8 opacity-10"><User size={120} /></div>
-        <h1 className="text-3xl font-black mb-2 relative z-10">สวัสดี, {student.name}! 👋</h1>
-        <p className="text-blue-100 font-medium relative z-10">ห้อง {student.room} | เลขที่ {student.number}</p>
+      <div className={`rounded-3xl p-6 md:p-8 flex flex-col md:flex-row items-center md:items-start text-center md:text-left shadow-lg relative overflow-hidden bg-gradient-to-br ${isDark ? 'from-blue-900 to-indigo-900 border border-blue-800' : 'from-blue-600 to-cyan-500 border border-blue-500'}`}>
+        <div className="w-24 h-24 rounded-full bg-slate-800 border-4 border-white/30 flex items-center justify-center text-4xl font-black text-white shrink-0 mb-4 md:mb-0 shadow-lg relative z-10 overflow-hidden">
+          {student.profileImg ? <img src={getValidImgUrl(student.profileImg)} className="w-full h-full object-cover rounded-full"/> : student.name.charAt(0)}
+        </div>
+        <div className="md:ml-8 relative z-10 text-white">
+          <h2 className="text-3xl font-black mb-3">{student.name}</h2>
+          <div className="flex flex-wrap justify-center md:justify-start gap-2">
+            <span className="bg-white/20 backdrop-blur-sm px-4 py-1.5 rounded-xl font-mono font-bold text-sm shadow-sm border border-white/10">รหัส {student.id}</span>
+            <span className="bg-white/20 backdrop-blur-sm px-4 py-1.5 rounded-xl font-bold text-sm shadow-sm border border-white/10">ห้อง {student.room} | ตอน {student.section || '-'} | เลขที่ {student.number}</span>
+          </div>
+          <p className="text-sm font-bold mt-5 flex items-center justify-center md:justify-start"><Layers size={16} className="mr-2"/> ลงทะเบียนเรียน {subjects.length} วิชา</p>
+        </div>
       </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mt-6">
-        <div onClick={() => setActiveTab('subjects')} className={`p-6 rounded-3xl shadow-sm border cursor-pointer transition-transform hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-blue-100'}`}>
-          <div className="flex justify-between items-center"><h3 className={`font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>วิชาที่เรียน</h3><div className={`p-3 rounded-2xl ${isDark ? 'bg-slate-900' : 'bg-blue-50'}`}><Layers className="text-blue-500"/></div></div>
-          <p className="text-3xl font-black mt-4 text-blue-500">{subjects.length} <span className="text-sm font-bold text-slate-400">วิชา</span></p>
+      
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-8">
+        <div className={`p-8 rounded-3xl border flex flex-col items-center justify-center cursor-pointer transition-all shadow-sm hover:border-amber-500 group relative overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`} onClick={() => setActiveTab('assignments')}>
+          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><AlertCircle size={100}/></div>
+          <AlertCircle className="text-amber-500 mb-4" size={40} />
+          <h3 className="text-xl font-black">งานที่ยังไม่ส่ง</h3>
+          <p className="text-5xl font-black text-amber-500 mt-2">{pendingAsgs.length} <span className="text-lg font-bold opacity-60">ชิ้น</span></p>
         </div>
-        <div onClick={() => setActiveTab('assignments')} className={`p-6 rounded-3xl shadow-sm border cursor-pointer transition-transform hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-amber-100'}`}>
-          <div className="flex justify-between items-center"><h3 className={`font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>งานที่ต้องส่ง</h3><div className={`p-3 rounded-2xl ${isDark ? 'bg-slate-900' : 'bg-amber-50'}`}><BookOpen className="text-amber-500"/></div></div>
-          <p className="text-3xl font-black mt-4 text-amber-500">{pendingAsgs.length} <span className="text-sm font-bold text-slate-400">ชิ้น</span></p>
-        </div>
-        <div onClick={() => setActiveTab('scores')} className={`p-6 rounded-3xl shadow-sm border cursor-pointer transition-transform hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-emerald-100'}`}>
-          <div className="flex justify-between items-center"><h3 className={`font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>สรุปคะแนน</h3><div className={`p-3 rounded-2xl ${isDark ? 'bg-slate-900' : 'bg-emerald-50'}`}><BarChart2 className="text-emerald-500"/></div></div>
-          <p className="text-lg font-black mt-5 text-emerald-500 flex items-center">คลิกดูคะแนน <ArrowUpDown size={16} className="ml-2"/></p>
+        <div className={`p-8 rounded-3xl border flex flex-col items-center justify-center cursor-pointer transition-all shadow-sm hover:border-emerald-500 group relative overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`} onClick={() => setActiveTab('scores')}>
+          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><BarChart2 size={100}/></div>
+          <BarChart2 className="text-emerald-500 mb-4" size={40} />
+          <h3 className="text-xl font-black">สรุปคะแนน</h3>
+          <p className={`text-sm font-bold mt-4 px-5 py-2.5 rounded-xl ${isDark ? 'bg-emerald-900/30 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>คลิกเพื่อดูคะแนน</p>
         </div>
       </div>
     </div>
   );
 }
 
-function StudentAnnouncements({ announcements, student, enrollments, subjects, theme }) {
+function StudentAnnouncements({ announcements, theme, student }) {
   const isDark = theme === 'dark';
-  const mySubjectIds = enrollments.filter(e => String(e.studentId).trim() === String(student.id).trim()).map(e => e.subjectId);
-  const myAnnouncements = announcements.filter(ann => {
-     if (ann.targetSubject !== 'all' && !mySubjectIds.includes(ann.targetSubject)) return false;
-     if (ann.targetRoom !== 'all' && String(ann.targetRoom).trim() !== String(student.room).trim()) return false;
-     return true;
-  });
+  
+  // กรองประกาศที่ไม่ได้ระบุห้อง (ส่งถึงทุกคน) หรือระบุห้องตรงกับนักเรียน
+  const myAnnouncements = announcements.filter(a => 
+    !a.targetRooms || a.targetRooms.length === 0 || a.targetRooms.includes(String(student.room))
+  );
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <h2 className="text-2xl font-black mb-6 border-l-4 border-blue-600 pl-4">ประกาศข่าวสาร</h2>
+      <h2 className="text-2xl font-black border-l-4 border-blue-500 pl-4 mb-6">ประกาศข่าวสาร</h2>
       <div className="space-y-5">
-        {myAnnouncements.map(ann => {
-          const sub = subjects.find(s => s.id === ann.targetSubject);
-          return (
-            <div key={ann.id} className={`p-6 rounded-3xl shadow-sm border flex flex-col sm:flex-row gap-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              {ann.imageUrl && (
-                <div className="w-full sm:w-48 h-40 shrink-0 rounded-2xl overflow-hidden border border-slate-200 shadow-sm"><img src={getValidImgUrl(ann.imageUrl)} alt="Announcement" className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"/></div>
-              )}
-              <div className="flex-1 flex flex-col">
-                <div className="flex flex-wrap gap-2 mb-3">
-                   <div className={`text-xs font-bold flex items-center px-2 py-1 rounded-md ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-slate-100 text-slate-500'}`}><Clock size={12} className="mr-1.5"/> {ann.date}</div>
-                   {ann.targetSubject !== 'all' && <div className="text-xs font-bold text-white bg-blue-500 px-3 py-1 rounded-md shadow-sm">{sub?.name}</div>}
-                </div>
-                <h3 className="text-xl font-black mb-3 text-blue-600 dark:text-blue-400">{ann.title}</h3>
-                <p className={`whitespace-pre-wrap font-medium mb-5 flex-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{ann.content}</p>
-                {ann.linkUrl && (
-                  <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-700"><a href={ann.linkUrl.startsWith('http') ? ann.linkUrl : `https://${ann.linkUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded-xl transition-colors shadow-sm"><ExternalLink size={14} className="mr-2"/> เปิดลิงก์แนบ</a></div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {myAnnouncements.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีประกาศข่าวสารใหม่</div>}
+        {myAnnouncements.map(ann => (
+          <div key={ann.id} className={`p-6 md:p-8 rounded-3xl shadow-sm border border-l-8 border-l-blue-500 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <h3 className="text-xl font-black mb-3">{ann.title}</h3>
+            
+            {ann.imageUrl && <img src={getValidImgUrl(ann.imageUrl)} alt="Announcement" className="w-full max-h-80 object-cover rounded-2xl mb-5 shadow-sm border border-slate-200 dark:border-slate-700" />}
+            
+            <p className={`whitespace-pre-wrap font-medium mb-5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{ann.content}</p>
+            
+            {ann.linkUrl && <a href={ann.linkUrl} target="_blank" rel="noreferrer" className={`mb-5 inline-flex items-center text-sm font-bold px-5 py-2.5 rounded-xl transition-colors ${isDark ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`}><ExternalLink size={16} className="mr-2"/> เปิดดูลิงก์แนบ</a>}
+            
+            <div className={`text-xs font-bold flex items-center mt-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}><Clock size={14} className="mr-1"/> {ann.date}</div>
+          </div>
+        ))}
+        {myAnnouncements.length === 0 && <div className={`text-center py-16 rounded-3xl border font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีประกาศข่าวสารใหม่</div>}
       </div>
     </div>
   );
 }
 
 function StudentMaterials({ subjects, materials, theme }) {
+  const [searchQuery, setSearchQuery] = useState('');
   const isDark = theme === 'dark';
+  const mySubIds = subjects.map(s => s.id);
+  const myMats = materials.filter(m => mySubIds.includes(m.subjectId) && (m.title.toLowerCase().includes(searchQuery.toLowerCase()) || m.description.toLowerCase().includes(searchQuery.toLowerCase())));
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <h2 className="text-2xl font-black mb-6 border-l-4 border-blue-600 pl-4">คลังสื่อการเรียน / ใบงาน</h2>
-      {subjects.map(sub => {
-        const subMats = materials.filter(m => m.subjectId === sub.id);
-        if(subMats.length === 0) return null;
-        return (
-          <div key={sub.id} className="mb-8">
-            <h3 className={`font-black text-lg mb-4 flex items-center ${isDark ? 'text-slate-300' : 'text-slate-700'}`}><Layers size={18} className="mr-2 text-blue-500"/> {sub.name}</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {subMats.map(m => (
-                <div key={m.id} className={`p-5 rounded-2xl shadow-sm flex flex-col justify-between border transition-all hover:border-blue-300 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <div>
-                     <h4 className="font-black text-blue-600 dark:text-blue-400 mb-1 leading-tight">{m.title}</h4>
-                     <p className={`text-xs mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m.description || 'ไม่มีคำอธิบายเพิ่มเติม'}</p>
-                  </div>
-                  <div className={`pt-3 border-t flex justify-between items-center mt-2 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                     <span className="text-[10px] text-slate-400 font-bold">{m.uploadedAt}</span>
-                     <a href={m.url} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 px-4 py-2 rounded-lg flex items-center transition-colors"><DownloadCloud size={14} className="mr-1.5"/> เปิดเอกสาร</a>
-                  </div>
+    <div className="max-w-5xl mx-auto space-y-6">
+       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+         <h2 className="text-2xl font-black border-l-4 border-blue-500 pl-4">คลังสื่อการเรียน / ใบงาน</h2>
+         <div className="relative w-full sm:w-auto">
+           <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} size={18} />
+           <input type="text" placeholder="ค้นหาใบงาน..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className={`pl-10 pr-4 py-2.5 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64 border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200'}`} />
+         </div>
+       </div>
+       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+         {myMats.map(m => {
+            const sub = subjects.find(s => s.id === m.subjectId);
+            return (
+              <div key={m.id} className={`p-6 rounded-3xl shadow-sm flex flex-col justify-between border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                <div>
+                  <div className="text-xs bg-blue-500/10 text-blue-500 font-bold px-3 py-1.5 rounded-lg inline-block mb-3">{sub?.name}</div>
+                  {m.coverUrl && <img src={getValidImgUrl(m.coverUrl)} alt="Cover" className="w-full h-48 object-cover rounded-2xl mb-4 shadow-sm border border-slate-200 dark:border-slate-700" />}
+                  <h4 className="font-black text-xl">{m.title}</h4>
+                  <p className={`text-sm my-3 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m.description}</p>
                 </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-      {subjects.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>คุณยังไม่ได้ลงทะเบียนเรียนวิชาใดๆ</div>}
-      {subjects.length > 0 && materials.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีสื่อการเรียนในระบบ</div>}
+                <div className={`mt-4 pt-4 border-t text-right ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                  <a href={m.url} target="_blank" rel="noreferrer" className="inline-flex items-center px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-colors"><ExternalLink size={16} className="mr-2"/> เปิดดูเอกสาร</a>
+                </div>
+              </div>
+            )
+         })}
+         {myMats.length === 0 && <div className={`col-span-full text-center py-16 rounded-3xl border font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ไม่พบใบงานที่ค้นหา</div>}
+       </div>
     </div>
   );
 }
 
-function StudentAssignments({ student, subjects, assignments, submissions, setSubmissions, showToast, dbUrl, theme }) {
+function StudentAssignments({ student, assignments, submissions, setSubmissions, subjects, showToast, dbUrl, theme }) {
+  const [selectedAsg, setSelectedAsg] = useState(null);
   const [file, setFile] = useState(null);
-  const [activeAsg, setActiveAsg] = useState(null);
-  const [submitType, setSubmitType] = useState('file');
   const [linkUrl, setLinkUrl] = useState('');
-  const [uploading, setUploading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [filterSub, setFilterSub] = useState('all');
   const isDark = theme === 'dark';
 
-  const myAsgs = assignments.filter(a => !a.targetRoom || a.targetRoom === 'all' || String(a.targetRoom).trim() === String(student.room).trim());
+  const filteredAsgs = filterSub === 'all' ? assignments : assignments.filter(a => a.subjectId === filterSub);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (submitType === 'file' && !file) return showToast('กรุณาเลือกไฟล์');
-    if (submitType === 'link' && !linkUrl) return showToast('กรุณาระบุลิงก์ผลงาน');
-    if (submitType === 'file' && !dbUrl) return showToast('ระบบไม่ได้เชื่อมต่อฐานข้อมูล ครูผู้สอนยังไม่ได้เปิดระบบอัปโหลด');
+    if (!file && !linkUrl) return showToast('กรุณาระบุลิงก์ หรือ แนบไฟล์ผลงาน');
+    
+    setIsUploading(true);
+    try {
+      let finalFileUrl = linkUrl;
+      let submitType = linkUrl ? 'link' : 'file';
 
-    setUploading(true);
-    let finalUrl = linkUrl;
+      // ถ้ามีการแนบไฟล์ ต้องส่งไฟล์ไปที่ Drive (ผ่าน GAS) ก่อน
+      if (file) {
+        if (!dbUrl) {
+          setIsUploading(false);
+          return showToast('ระบบไม่ได้เชื่อมต่อฐานข้อมูล ครูผู้สอนยังไม่ได้เปิดระบบอัปโหลดไฟล์');
+        }
+        showToast('กำลังอัปโหลดไฟล์ไปที่ Drive...');
+        const reader = new FileReader();
+        const base64 = await new Promise((resolve) => {
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.readAsDataURL(file);
+        });
+        
+        // แก้ไขชื่อไฟล์ใหม่: รหัส_ชื่อนักเรียน_ชื่อไฟล์
+        const cleanName = student.name.replace(/\s+/g, '_'); // เปลี่ยนช่องว่างในชื่อเป็น _ ป้องกันชื่อไฟล์เว้นวรรค
+        const newFileName = `${student.id}_${cleanName}_${file.name}`;
 
-    if (submitType === 'file') {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      await new Promise(resolve => {
-        reader.onload = async () => {
-          const base64 = reader.result.split(',')[1];
-          // เปลี่ยน action ให้ตรงกับ Google Apps Script เป็น uploadSubmission
-          const payload = { action: 'uploadSubmission', filename: `${student.id}_${file.name}`, mimeType: file.type, fileData: base64 };
-          try {
-            const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-            const data = await res.json();
-            if (data.url) {
-               finalUrl = data.url;
-            } else if (data.status === 'error') {
-               showToast(`ข้อผิดพลาด: ${data.message}`);
-            }
-          } catch(err) { showToast('อัปโหลดไฟล์ล้มเหลว ตรวจสอบอินเทอร์เน็ต'); }
-          resolve();
+        const payload = { 
+          action: 'uploadFile', 
+          type: 'submission', 
+          filename: newFileName, 
+          mimeType: file.type, 
+          fileData: base64,
+          subFolderName: selectedAsg.title // ส่งชื่อโฟลเดอร์ให้ Google Apps Script สร้างให้
         };
-        reader.onerror = () => {
-          showToast('เกิดข้อผิดพลาดในการอ่านไฟล์');
-          resolve();
-        };
-      });
-    }
-
-    if (finalUrl) {
-      let latestSubs = submissions;
-      try {
-          const localStr = localStorage.getItem('kasem_local_data');
-          if (localStr) {
-              const localData = JSON.parse(localStr);
-              if (localData && localData.submissions) latestSubs = localData.submissions;
-          }
-      } catch(e) {}
-
-      const existingSubIndex = latestSubs.findIndex(s => s.assignmentId === activeAsg.id && String(s.studentId).trim() === String(student.id).trim());
-      const newSubData = { id: `s${Date.now()}`, assignmentId: activeAsg.id, studentId: String(student.id).trim(), fileUrl: finalUrl, submittedAt: new Date().toLocaleString('th-TH'), submittedAtISO: new Date().toISOString(), status: 'submitted', type: submitType };
-
-      if (existingSubIndex >= 0) {
-          const updatedSubs = [...latestSubs];
-          updatedSubs[existingSubIndex] = { ...updatedSubs[existingSubIndex], ...newSubData, id: updatedSubs[existingSubIndex].id }; 
-          setSubmissions(updatedSubs);
-      } else {
-          setSubmissions([newSubData, ...latestSubs]);
+        
+        const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
+        const data = await res.json();
+        
+        if (data.url) {
+           finalFileUrl = data.url;
+           submitType = 'file';
+        } else {
+           throw new Error('Upload error');
+        }
       }
-      showToast('ส่งงานเรียบร้อยแล้ว!');
-      setActiveAsg(null); setFile(null); setLinkUrl('');
-    }
-    setUploading(false);
+      
+      showToast('กำลังบันทึกข้อมูลส่งงานลงระบบ...');
+      
+      const existingSub = submissions.find(s => s.assignmentId === selectedAsg.id && String(s.studentId) === String(student.id));
+      const subId = existingSub ? existingSub.id : `s${Date.now()}_${student.id}`;
+      
+      const newSub = { 
+          id: subId, 
+          assignmentId: selectedAsg.id, 
+          studentId: String(student.id), 
+          status: 'submitted', 
+          score: 0, 
+          rawScore: 0,
+          penalty: 0,
+          fileUrl: finalFileUrl, 
+          type: submitType,
+          submittedAt: new Date().toLocaleString('th-TH') 
+      };
+
+      if (dbUrl) {
+        if (existingSub) {
+           await fetch(dbUrl, { method: 'POST', body: JSON.stringify({ action: 'updateRecord', sheetName: 'submissions', keyField: 'id', keyValue: subId, updateData: newSub }) });
+        } else {
+           await fetch(dbUrl, { method: 'POST', body: JSON.stringify({ action: 'addRecord', sheetName: 'submissions', data: newSub }) });
+        }
+      }
+
+      const updatedSubs = existingSub ? submissions.map(s => s.id === subId ? newSub : s) : [...submissions, newSub];
+      setSubmissions(updatedSubs);
+      
+      showToast('ส่งงานเรียบร้อย บันทึกข้อมูลลงระบบสำเร็จ');
+      setSelectedAsg(null); setFile(null); setLinkUrl('');
+    } catch (error) { 
+       showToast('เกิดข้อผิดพลาดในการส่งงาน กรุณาลองอีกครั้ง'); 
+    } 
+    setIsUploading(false);
   };
 
+  const selectClass = `font-bold rounded-xl p-3 outline-none border focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <h2 className="text-2xl font-black mb-6 border-l-4 border-blue-600 pl-4">งานที่มอบหมาย</h2>
-      
-      {activeAsg && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in" onClick={()=>!uploading && setActiveAsg(null)}>
-          <div className={`rounded-3xl w-full max-w-md p-6 shadow-2xl relative border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`} onClick={e=>e.stopPropagation()}>
-            <button onClick={()=>!uploading && setActiveAsg(null)} className={`absolute top-4 right-4 p-2 rounded-full ${isDark ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'}`} disabled={uploading}><X size={20}/></button>
-            <h3 className="text-xl font-black mb-1 pr-10 text-blue-600 dark:text-blue-400">{activeAsg.title}</h3>
-            <p className={`text-sm mb-6 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>กำหนดส่ง: {activeAsg.dueDate}</p>
+    <div className="max-w-5xl mx-auto space-y-6 relative">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <h3 className="text-2xl font-black border-l-4 border-blue-500 pl-4">งานที่ต้องส่ง</h3>
+        <select value={filterSub} onChange={e => setFilterSub(e.target.value)} className={selectClass}><option value="all">ทุกวิชา</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+      </div>
+
+      <div className="space-y-5">
+        {filteredAsgs.map(asg => {
+          const subObj = subjects.find(s => s.id === asg.subjectId);
+          const sub = submissions.find(s => s.assignmentId === asg.id && String(s.studentId).trim() === String(student.id).trim());
+          const isLate = asg.dueDate ? new Date() > new Date(asg.dueDate + 'T23:59:59') : false;
+
+          return (
+            <div key={asg.id} className={`rounded-3xl p-6 shadow-sm flex flex-col md:flex-row justify-between gap-6 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className="flex-1">
+                <span className="text-xs font-bold bg-blue-500/10 text-blue-500 px-3 py-1.5 rounded-lg mb-3 inline-block">{subObj?.name}</span>
+                <h4 className="text-2xl font-black mb-3">{asg.title}</h4>
+                <p className={`text-sm font-bold mb-5 p-4 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-100 text-slate-600'}`}>{asg.description}</p>
+                
+                {asg.linkUrl && (
+                  <a href={asg.linkUrl} target="_blank" rel="noreferrer" className={`mb-5 inline-flex items-center text-sm font-bold px-4 py-2 rounded-xl transition-colors ${isDark ? 'bg-blue-900/30 text-blue-400 hover:bg-blue-900/50' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}>
+                    <ExternalLink size={16} className="mr-2"/> เปิดดูลักษณะงาน/ภาพประกอบ
+                  </a>
+                )}
+
+                <div className="flex flex-wrap gap-3">
+                  <span className={`text-xs font-bold px-4 py-2 rounded-xl flex items-center shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}><Clock size={14} className={`mr-2 ${isLate && !sub ? 'text-red-500' : 'text-amber-500'}`}/> กำหนดส่ง: {asg.dueDate}</span>
+                  <span className={`text-xs font-bold px-4 py-2 rounded-xl flex items-center shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}><BarChart2 size={14} className="mr-2 text-emerald-500"/> เต็ม: {asg.maxScore}</span>
+                </div>
+              </div>
+              <div className={`flex flex-col justify-center min-w-[160px] border-t md:border-t-0 md:border-l pt-5 md:pt-0 md:pl-6 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                {sub ? (
+                  sub.status === 'graded' ? (
+                     <div className="text-center w-full flex flex-col gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-emerald-500 mb-2 uppercase tracking-wide">ตรวจแล้ว</div>
+                          <div className="text-3xl font-black text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-5 py-4 rounded-2xl">{sub.score} <span className="text-base font-bold opacity-50">/ {asg.maxScore}</span></div>
+                          {sub.penalty > 0 && <div className="text-xs font-bold text-red-500 mt-2">หักส่งช้า -{sub.penalty}</div>}
+                          {sub.fileUrl && (
+                             <a href={sub.fileUrl} target="_blank" rel="noreferrer" className={`mt-3 flex items-center justify-center px-4 py-2 text-sm font-bold rounded-xl transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-blue-50 hover:bg-blue-100 text-blue-700'}`}>
+                                <ExternalLink size={14} className="mr-2"/> เปิดดูงานที่ส่ง
+                             </a>
+                          )}
+                        </div>
+                     </div>
+                  ) : (
+                    <div className="flex flex-col gap-2 w-full">
+                       <div className="px-5 py-4 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-2xl text-sm font-black flex items-center justify-center"><Clock size={18} className="mr-2" /> รอตรวจ</div>
+                       <button onClick={() => { setSelectedAsg(asg); setLinkUrl(''); setFile(null); }} className={`px-4 py-2 rounded-lg text-sm font-bold border transition-colors ${isDark ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'border-slate-200 hover:bg-slate-100 text-slate-600'}`}>ส่งใหม่ (ทับของเดิม)</button>
+                    </div>
+                  )
+                ) : (
+                  <button onClick={() => { setSelectedAsg(asg); setLinkUrl(''); setFile(null); }} className="w-full px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold shadow-md transition-all text-lg">ส่งงานนี้</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {selectedAsg && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className={`rounded-3xl w-full max-w-lg p-8 shadow-2xl relative border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <button onClick={() => !isUploading && setSelectedAsg(null)} disabled={isUploading} className={`absolute top-5 right-5 p-2 rounded-full ${isDark ? 'bg-slate-900 text-slate-400' : 'bg-slate-100 text-slate-500'}`}><X size={20}/></button>
+            <h3 className="text-2xl font-black mb-2">ส่งผลงาน</h3>
+            <h4 className="text-blue-500 font-bold mb-6 pb-4 border-b border-slate-700/50 text-lg">{selectedAsg.title}</h4>
             
-            <form onSubmit={handleSubmit}>
-              <div className={`flex rounded-xl p-1 mb-5 border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
-                <button type="button" onClick={()=>setSubmitType('file')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${submitType === 'file' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}>แนบไฟล์</button>
-                <button type="button" onClick={()=>setSubmitType('link')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${submitType === 'link' ? (isDark ? 'bg-blue-600 text-white' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}>แนบลิงก์ผลงาน</button>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              
+              <div className={`p-5 rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <label className="block text-sm font-bold mb-2 text-blue-500">
+                  <LinkIcon size={18} className="inline mr-2"/> วางลิงก์ผลงาน
+                </label>
+                <p className={`text-xs font-bold mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>* หากส่งเป็นลิงก์ ให้อัปโหลดไฟล์ลง Google Drive ตัวเอง เปิดสิทธิ์ <strong>"ทุกคนที่มีลิงก์"</strong> แล้วนำมาวาง</p>
+                <input type="url" value={linkUrl} onChange={e=>setLinkUrl(e.target.value)} className={`w-full rounded-xl px-4 py-3 font-bold outline-none border focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-300'}`} placeholder="https://..." />
               </div>
 
-              {submitType === 'file' ? (
-                <div className={`border-2 border-dashed rounded-2xl p-8 text-center relative cursor-pointer transition-colors ${isDark ? 'border-slate-600 bg-slate-900/50 hover:border-blue-500 hover:bg-blue-900/20' : 'border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50'}`}>
-                  <input type="file" required onChange={e=>setFile(e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-                  <Upload size={32} className={`mx-auto mb-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
-                  <span className={`font-bold text-sm ${file ? 'text-blue-500' : (isDark ? 'text-slate-400' : 'text-slate-500')}`}>{file ? file.name : 'คลิกเพื่อเลือกไฟล์ผลงาน'}</span>
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-sm font-bold mb-2">วางลิงก์ผลงาน (URL)</label>
-                  <input required type="url" value={linkUrl} onChange={e=>setLinkUrl(e.target.value)} className={`w-full rounded-xl px-4 py-3 font-bold outline-none border focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} placeholder="https://..." />
-                </div>
-              )}
-              <button type="submit" disabled={uploading} className="w-full mt-6 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-all flex items-center justify-center disabled:opacity-50">
-                {uploading ? <><RefreshCw size={18} className="mr-2 animate-spin"/> กำลังส่งงาน...</> : 'ยืนยันการส่งงาน'}
+              <div className={`border-2 border-dashed rounded-2xl p-6 text-center relative cursor-pointer hover:border-blue-500 transition-colors ${isDark ? 'border-slate-600 bg-slate-900' : 'border-slate-300 bg-slate-50'}`}>
+                <input type="file" onChange={(e) => setFile(e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                <Upload size={32} className="mx-auto text-blue-500 mb-2" />
+                <p className="font-bold text-md">{file ? file.name : 'หรือแนบไฟล์โดยตรง (คลิก / ลากมาวาง)'}</p>
+                <p className={`text-xs font-bold mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>(ระบบจะบันทึกเข้า Google Drive ของคุณครูโดยอัตโนมัติ)</p>
+              </div>
+              
+              <button type="submit" disabled={isUploading || (!linkUrl && !file)} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold disabled:opacity-50 shadow-md text-lg flex justify-center items-center">
+                {isUploading ? <><Clock size={20} className="mr-2 animate-spin"/> กำลังบันทึกข้อมูล...</> : 'ยืนยันการส่งงาน'}
               </button>
             </form>
           </div>
         </div>
       )}
-
-      {subjects.map(sub => {
-        const asgs = myAsgs.filter(a => a.subjectId === sub.id);
-        if(asgs.length === 0) return null;
-        return (
-          <div key={sub.id} className={`mb-8 p-6 md:p-8 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <h3 className={`font-black text-xl mb-6 pb-4 border-b flex justify-between items-center ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-               <span className="flex items-center"><Layers size={20} className="mr-3 text-blue-500"/> {sub.name}</span>
-               <span className="text-xs bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400 px-3 py-1.5 rounded-lg">{sub.code}</span>
-            </h3>
-            <div className="space-y-4">
-              {asgs.map(a => {
-                const subM = submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim());
-                const isLate = a.dueDate ? new Date() > new Date(a.dueDate + 'T23:59:59') : false;
-                
-                return (
-                  <div key={a.id} className={`p-5 rounded-2xl border flex flex-col md:flex-row gap-5 relative overflow-hidden transition-all hover:shadow-md ${isDark ? 'bg-slate-900/50 border-slate-700 hover:border-blue-500/50' : 'bg-slate-50 border-slate-200 hover:border-blue-300'}`}>
-                    
-                    {a.imageUrl && (
-                      <div className="w-full md:w-40 h-32 shrink-0 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
-                        <img src={getValidImgUrl(a.imageUrl)} alt="Assignment" className="w-full h-full object-cover"/>
-                      </div>
-                    )}
-                    
-                    <div className="flex-1 flex flex-col">
-                      <div className="flex justify-between items-start mb-2 gap-4">
-                        <h4 className="font-black text-lg text-blue-600 dark:text-blue-400 leading-tight">{a.title}</h4>
-                        <div className={`text-xs font-bold px-3 py-1 rounded whitespace-nowrap ${subM ? (subM.status === 'graded' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700') : (isLate ? 'bg-red-100 text-red-700' : (isDark ? 'bg-slate-800 text-slate-300' : 'bg-amber-100 text-amber-700'))}`}>
-                           {subM ? (subM.status === 'graded' ? '✅ ตรวจแล้ว' : '⏳ รอตรวจ') : (isLate ? '⚠️ เลยกำหนด' : 'ยังไม่ส่ง')}
-                        </div>
-                      </div>
-                      <p className={`text-sm mb-4 line-clamp-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{a.description}</p>
-                      
-                      <div className={`mt-auto flex flex-wrap items-center justify-between gap-3 pt-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                        <div className={`text-xs font-bold flex gap-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                          <span className="flex items-center"><BarChart2 size={14} className="mr-1 text-emerald-500"/> เต็ม {a.maxScore}</span>
-                          <span className="flex items-center"><Clock size={14} className={`mr-1 ${isLate && !subM ? 'text-red-500' : 'text-amber-500'}`}/> กำหนดส่ง: {a.dueDate}</span>
-                        </div>
-                        
-                        <div>
-                          {subM ? (
-                            subM.status === 'graded' ? (
-                              <div className="text-right">
-                                <span className="text-lg font-black text-emerald-500 bg-emerald-500/10 px-4 py-1.5 rounded-lg border border-emerald-500/20">{subM.score} / {a.maxScore}</span>
-                                {subM.penalty > 0 && <div className="text-[10px] text-red-500 font-bold mt-1">ถูกหักส่งช้า -{subM.penalty}</div>}
-                              </div>
-                            ) : (
-                              <button onClick={() => { setActiveAsg(a); setSubmitType('file'); setFile(null); setLinkUrl(''); }} className="px-5 py-2 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50 rounded-lg text-sm font-bold transition-colors">ส่งงานใหม่ (เขียนทับ)</button>
-                            )
-                          ) : (
-                            <button onClick={() => { setActiveAsg(a); setSubmitType('file'); setFile(null); setLinkUrl(''); }} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-md transition-colors flex items-center"><Upload size={16} className="mr-2"/> ส่งงาน</button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
-      {subjects.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>คุณยังไม่ได้ลงทะเบียนเรียนวิชาใดๆ</div>}
     </div>
   );
 }
 
-function StudentScores({ student, subjects, assignments, submissions, theme }) {
+function StudentScores({ student, subjects, assignments, submissions, exams, theme }) {
   const isDark = theme === 'dark';
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <h3 className="text-2xl font-black border-l-4 border-blue-500 pl-4 mb-6">สรุปคะแนนแยกรายวิชา</h3>
       {subjects.map(sub => {
-        const subAsgs = assignments.filter(a => 
-           a.subjectId === sub.id && 
-           (!a.targetRoom || a.targetRoom === 'all' || String(a.targetRoom).trim() === String(student.room).trim())
-        );
-        if(subAsgs.length === 0) return null;
-        let totalScore = 0; let maxTotal = 0;
+        const subAsgs = assignments.filter(a => a.subjectId === sub.id);
+        
+        let totalScore = 0; 
+        let maxTotal = 0;
+        
+        const examRec = exams?.find(e => String(e.studentId) === String(student.id) && e.subjectId === sub.id) || { midterm: 0, final: 0 };
+        const maxMid = sub.midtermMax || 20;
+        const maxFin = sub.finalMax || 30;
+        
+        maxTotal += maxMid + maxFin;
+        totalScore += (examRec.midterm || 0) + (examRec.final || 0);
         
         return (
-          <div key={sub.id} className={`p-6 md:p-8 rounded-3xl shadow-sm mb-6 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <h4 className="font-black text-xl mb-6 pb-4 border-b flex items-center text-blue-600 dark:text-blue-400"><Layers size={20} className="mr-3"/> {sub.name} <span className="text-sm font-bold text-slate-400 ml-3">({sub.code})</span></h4>
-            <div className="space-y-3 mb-6">
-              {subAsgs.map(a => {
-                const subM = submissions.find(s => s.assignmentId === a.id && String(s.studentId).trim() === String(student.id).trim());
-                const score = (subM && subM.status === 'graded') ? getSafeNum(subM.score, 0) : 0;
-                totalScore += score; maxTotal += getSafeNum(a.maxScore, 0);
-                return (
-                  <div key={a.id} className={`flex justify-between items-center p-4 rounded-2xl border transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 hover:border-slate-600' : 'bg-slate-50 border-slate-100 hover:border-slate-200'}`}>
-                    <span className="font-bold">{a.title}</span>
-                    <div className="flex items-center gap-3">
-                       {subM?.penalty > 0 && <span className="text-xs font-bold text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">หักช้า -{subM.penalty}</span>}
-                       <span className={`font-black ${score > 0 ? 'text-emerald-500' : (isDark ? 'text-slate-500' : 'text-slate-400')}`}>{score} <span className="text-xs font-bold opacity-50">/ {a.maxScore}</span></span>
-                    </div>
-                  </div>
-                );
-              })}
+          <div key={sub.id} className={`rounded-3xl overflow-hidden mb-6 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className={`p-5 md:p-6 border-b flex justify-between items-center ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+              <div><span className="text-xs font-bold bg-blue-500/10 text-blue-500 px-3 py-1.5 rounded-lg mr-3">{sub.code}</span><span className="text-xl font-black">{sub.name}</span></div>
+              <div className={`text-sm font-bold px-4 py-1.5 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>เทอม {sub.semester}/{sub.year}</div>
             </div>
-            <div className={`p-5 rounded-2xl flex justify-between items-center shadow-inner border ${isDark ? 'bg-blue-900/20 border-blue-900/50' : 'bg-blue-50 border-blue-100'}`}>
-              <span className="font-black text-blue-600 dark:text-blue-400">คะแนนเก็บรวมวิชานี้</span>
-              <span className="text-2xl font-black text-blue-600 dark:text-blue-400">{totalScore} <span className="text-sm font-bold opacity-60">/ {maxTotal}</span></span>
+            <table className="w-full text-left text-sm font-bold">
+              <tbody className={`divide-y ${isDark ? 'divide-slate-700' : 'divide-slate-100'}`}>
+                {subAsgs.map(asg => {
+                  maxTotal += asg.maxScore;
+                  const subM = submissions.find(s => s.assignmentId === asg.id && String(s.studentId).trim() === String(student.id).trim());
+                  const score = (subM && subM.status === 'graded') ? subM.score : 0;
+                  totalScore += score;
+                  return (
+                    <tr key={asg.id} className={`transition-colors ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}`}>
+                      <td className="p-5">{asg.title}</td>
+                      <td className="p-5 text-right">{subM && subM.status === 'graded' ? <span className="text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-xl">{score} / {asg.maxScore}</span> : <span className="text-slate-500">- / {asg.maxScore}</span>}</td>
+                    </tr>
+                  );
+                })}
+                {subAsgs.length === 0 && (
+                  <tr>
+                    <td colSpan="2" className={`p-5 text-center text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>ยังไม่มีการมอบหมายงานเก็บคะแนน</td>
+                  </tr>
+                )}
+                <tr className={`transition-colors ${isDark ? 'bg-amber-900/10 hover:bg-amber-900/20' : 'bg-amber-50/50 hover:bg-amber-50'}`}>
+                  <td className={`p-5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>สอบกลางภาค</td>
+                  <td className="p-5 text-right">{examRec.midterm > 0 ? <span className="text-amber-500 bg-amber-500/10 border border-amber-500/20 px-4 py-2 rounded-xl">{examRec.midterm} / {maxMid}</span> : <span className="text-slate-500">- / {maxMid}</span>}</td>
+                </tr>
+                <tr className={`transition-colors ${isDark ? 'bg-amber-900/10 hover:bg-amber-900/20' : 'bg-amber-50/50 hover:bg-amber-50'}`}>
+                  <td className={`p-5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>สอบปลายภาค</td>
+                  <td className="p-5 text-right">{examRec.final > 0 ? <span className="text-amber-500 bg-amber-500/10 border border-amber-500/20 px-4 py-2 rounded-xl">{examRec.final} / {maxFin}</span> : <span className="text-slate-500">- / {maxFin}</span>}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="p-6 bg-blue-600 flex justify-between items-center text-white">
+              <span className="font-bold text-lg">คะแนนรวมสุทธิ</span>
+              <span className="text-3xl font-black">{totalScore} <span className="text-xl font-bold opacity-70">/ {maxTotal}</span></span>
             </div>
           </div>
         );
       })}
-      {subjects.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>คุณยังไม่ได้ลงทะเบียนเรียนวิชาใดๆ</div>}
     </div>
   );
 }
 
-function StudentAttendance({ student, subjects, attendance, theme }) {
+function StudentAttendance({ student, subjects, attendance, behaviors, theme }) {
   const isDark = theme === 'dark';
+  const studentAtt = attendance.filter(a => String(a.studentId).trim() === String(student.id).trim());
+  const studentBeh = behaviors.filter(b => String(b.studentId).trim() === String(student.id).trim());
+  
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <h3 className="text-2xl font-black border-l-4 border-blue-500 pl-4 mb-6">สถิติการเข้าเรียน</h3>
-      {subjects.map(sub => {
-        const records = attendance.filter(a => a.subjectId === sub.id && String(a.studentId).trim() === String(student.id).trim()).sort((a,b) => new Date(b.date) - new Date(a.date));
-        if(records.length === 0) return null;
-
-        const counts = { present: 0, late: 0, leave: 0, absent: 0 };
-        records.forEach(r => counts[r.status]++);
-
-        return (
-          <div key={sub.id} className={`p-6 md:p-8 rounded-3xl shadow-sm mb-6 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <h4 className="font-black text-xl mb-6 text-blue-600 dark:text-blue-400">{sub.name} <span className="text-sm font-bold text-slate-400 ml-2">({sub.code})</span></h4>
-            <div className="grid grid-cols-4 gap-3 mb-6">
-              <div className={`p-3 rounded-2xl text-center border ${isDark ? 'bg-green-900/20 border-green-900/50' : 'bg-green-50 border-green-100'}`}><div className="text-xl font-black text-green-600 dark:text-green-400">{counts.present}</div><div className="text-[10px] font-bold text-green-700 dark:text-green-500">มา</div></div>
-              <div className={`p-3 rounded-2xl text-center border ${isDark ? 'bg-amber-900/20 border-amber-900/50' : 'bg-amber-50 border-amber-100'}`}><div className="text-xl font-black text-amber-600 dark:text-amber-400">{counts.late}</div><div className="text-[10px] font-bold text-amber-700 dark:text-amber-500">สาย</div></div>
-              <div className={`p-3 rounded-2xl text-center border ${isDark ? 'bg-blue-900/20 border-blue-900/50' : 'bg-blue-50 border-blue-100'}`}><div className="text-xl font-black text-blue-600 dark:text-blue-400">{counts.leave}</div><div className="text-[10px] font-bold text-blue-700 dark:text-blue-500">ลา</div></div>
-              <div className={`p-3 rounded-2xl text-center border ${isDark ? 'bg-red-900/20 border-red-900/50' : 'bg-red-50 border-red-100'}`}><div className="text-xl font-black text-red-600 dark:text-red-400">{counts.absent}</div><div className="text-[10px] font-bold text-red-700 dark:text-red-500">ขาด</div></div>
+      <h3 className="text-2xl font-black border-l-4 border-blue-500 pl-4 mb-6">สถิติการเข้าเรียน & พฤติกรรม</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {subjects.map(sub => {
+          const subAtt = studentAtt.filter(a => a.subjectId === sub.id);
+          const present = subAtt.filter(a => a.status === 'present').length;
+          const late = subAtt.filter(a => a.status === 'late').length;
+          const absent = subAtt.filter(a => a.status === 'absent').length;
+          const bTotal = studentBeh.filter(b => b.subjectId === sub.id).reduce((sum, b) => sum + getSafeNum(b.points, 0), 0);
+          
+          return (
+            <div key={sub.id} className={`p-8 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+               <h4 className="text-xl font-black mb-2">{sub.name}</h4>
+               <p className={`text-xs font-bold mb-6 px-3 py-1 rounded-lg inline-block border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>{sub.code} | เทอม {sub.semester}/{sub.year}</p>
+               <div className="grid grid-cols-3 gap-3 text-center mb-4">
+                  <div className="bg-green-500/10 border border-green-500/20 py-4 rounded-2xl text-green-500"><span className="block text-xs font-bold mb-1">มา</span><span className="text-3xl font-black">{present}</span></div>
+                  <div className="bg-amber-500/10 border border-amber-500/20 py-4 rounded-2xl text-amber-500"><span className="block text-xs font-bold mb-1">สาย</span><span className="text-3xl font-black">{late}</span></div>
+                  <div className="bg-red-500/10 border border-red-500/20 py-4 rounded-2xl text-red-500"><span className="block text-xs font-bold mb-1">ขาด</span><span className="text-3xl font-black">{absent}</span></div>
+               </div>
+               <div className={`p-4 rounded-2xl text-center font-black text-lg border ${bTotal > 0 ? 'bg-green-500/10 text-green-500 border-green-500/20' : bTotal < 0 ? 'bg-red-500/10 text-red-500 border-red-500/20' : (isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200')}`}>
+                 คะแนนพฤติกรรม: {bTotal > 0 ? `+${bTotal}` : bTotal}
+               </div>
             </div>
-            <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
-               {records.map(r => {
-                 let sColor = '', sText = '';
-                 if(r.status==='present'){sColor='text-green-600 bg-green-100 dark:text-green-400 dark:bg-green-900/30'; sText='มาเรียน';}
-                 else if(r.status==='late'){sColor='text-amber-600 bg-amber-100 dark:text-amber-400 dark:bg-amber-900/30'; sText='สาย';}
-                 else if(r.status==='leave'){sColor='text-blue-600 bg-blue-100 dark:text-blue-400 dark:bg-blue-900/30'; sText='ลา';}
-                 else if(r.status==='absent'){sColor='text-red-600 bg-red-100 dark:text-red-400 dark:bg-red-900/30'; sText='ขาดเรียน';}
-                 
-                 return (
-                   <div key={r.id} className={`flex justify-between items-center p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
-                     <span className="font-bold flex items-center"><Calendar size={14} className="mr-2 text-slate-400"/> {r.date}</span>
-                     <span className={`text-xs font-black px-3 py-1 rounded-md ${sColor}`}>{sText}</span>
-                   </div>
-                 );
-               })}
-            </div>
-          </div>
-        );
-      })}
-      {subjects.length === 0 && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>คุณยังไม่ได้ลงทะเบียนเรียนวิชาใดๆ</div>}
-      {subjects.length > 0 && !attendance.find(a => String(a.studentId).trim() === String(student.id).trim()) && <div className={`text-center py-16 rounded-3xl border border-dashed font-bold ${isDark ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white border-slate-200 text-slate-400'}`}>ยังไม่มีบันทึกการเข้าเรียน</div>}
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function StudentProfile({ student, setStudents, students, theme, showToast, saveState }) {
+function StudentProfile({ student, students, saveState, showToast, dbUrl, theme }) {
+  const [pwdForm, setPwdForm] = useState({ old: '', new: '', confirm: '' });
+  const [phoneForm, setPhoneForm] = useState({ studentPhone: student.studentPhone || '', parentPhone: student.parentPhone || '' });
+  const [profileImg, setProfileImg] = useState(student.profileImg);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const isDark = theme === 'dark';
-  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
 
-  const [form, setForm] = useState({
-     password: student.password || '',
-     studentPhone: student.studentPhone || '',
-     parentPhone: student.parentPhone || '',
-     parentRelation: student.parentRelation || ''
-  });
-
-  const handleSaveProfile = (e) => {
-    e.preventDefault();
-    const updatedStudents = students.map(s => String(s.id).trim() === String(student.id).trim() ? { ...s, ...form } : s);
-    saveState({ students: updatedStudents });
-    showToast('อัปเดตข้อมูลโปรไฟล์ส่วนตัวเรียบร้อย');
+  const updateStudentInDB = async (updateData, successMessage) => {
+    setIsSaving(true);
+    try {
+      const updatedStudents = students.map(s => 
+        String(s.id).trim() === String(student.id).trim() ? { ...s, ...updateData } : s
+      );
+      
+      saveState({ students: updatedStudents }, true); 
+      
+      if (dbUrl) {
+        await fetch(dbUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'updateRecord',
+            sheetName: 'students',
+            keyField: 'id',
+            keyValue: String(student.id).trim(),
+            updateData: updateData
+          })
+        });
+      }
+      
+      showToast(successMessage);
+      
+    } catch (err) {
+      showToast('การบันทึกลงฐานข้อมูลล้มเหลว ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+    }
+    setIsSaving(false);
   };
 
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const resized = await resizeImage(file);
-      const updatedStudents = students.map(s => String(s.id).trim() === String(student.id).trim() ? { ...s, profileImg: resized } : s);
-      saveState({ students: updatedStudents });
-      showToast('อัปเดตรูปโปรไฟล์สำเร็จ');
+    if(!file) return;
+
+    if (!dbUrl) return showToast('ระบบขัดข้อง ไม่สามารถเชื่อมต่อฐานข้อมูลได้');
+
+    setIsUploading(true);
+    showToast('กำลังลดขนาดและอัปโหลดรูปภาพ...');
+    
+    try {
+      const base64DataUrl = await resizeImage(file);
+      const base64 = base64DataUrl.split(',')[1];
+
+      const payload = { 
+        action: 'uploadFile', 
+        type: 'profile',
+        filename: `Profile_${student.id}_${Date.now()}.jpg`, 
+        mimeType: 'image/jpeg', 
+        fileData: base64 
+      };
+      
+      const res = await fetch(dbUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      
+      if (data.url) {
+        setProfileImg(data.url);
+        await updateStudentInDB({ profileImg: data.url }, 'อัปเดตรูปประจำตัวและซิงค์ลงระบบสำเร็จ');
+      } else {
+        throw new Error('Upload failed');
+      }
+    } catch (err) {
+      showToast('เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ ตรวจสอบอินเทอร์เน็ตของคุณ');
     }
+    setIsUploading(false);
   };
 
-  return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div className={`p-6 md:p-8 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-        <h2 className="text-xl font-black mb-6 flex items-center border-l-4 border-blue-500 pl-3"><Settings className="mr-2 text-blue-500"/> ตั้งค่าโปรไฟล์ส่วนตัว</h2>
-        <form onSubmit={handleSaveProfile} className="space-y-6">
-          <div className="flex flex-col items-center mb-8 relative">
-            <div className={`w-32 h-32 rounded-full overflow-hidden mb-4 border-4 shadow-md ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-slate-50'}`}>
-              {student.profileImg ? <img src={getValidImgUrl(student.profileImg)} className="w-full h-full object-cover" /> : <User size={48} className="w-full h-full p-6 text-slate-300" />}
-            </div>
-            <label className="cursor-pointer bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900 px-5 py-2.5 rounded-full text-sm font-bold flex items-center transition-colors shadow-sm">
-              <Camera size={16} className="mr-2"/> เปลี่ยนรูปโปรไฟล์
-              <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
-            </label>
-          </div>
-          
-          <div className={`p-5 rounded-2xl border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-             <h3 className="font-bold text-blue-500 mb-4 flex items-center"><User size={18} className="mr-2"/> ข้อมูลติดต่อส่วนตัว</h3>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-               <div><label className="block text-sm font-bold mb-2">เบอร์โทรศัพท์นักเรียน</label><input type="text" value={form.studentPhone} onChange={e=>setForm({...form, studentPhone: e.target.value})} className={inputClass} placeholder="เช่น 08x-xxx-xxxx" /></div>
-               <div><label className="block text-sm font-bold mb-2">เบอร์โทรศัพท์ผู้ปกครอง</label><input type="text" value={form.parentPhone} onChange={e=>setForm({...form, parentPhone: e.target.value})} className={inputClass} placeholder="เช่น 08x-xxx-xxxx" /></div>
-               <div className="md:col-span-2"><label className="block text-sm font-bold mb-2">ความสัมพันธ์ผู้ปกครอง (เช่น บิดา, มารดา, ป้า)</label><input type="text" value={form.parentRelation} onChange={e=>setForm({...form, parentRelation: e.target.value})} className={inputClass} placeholder="ระบุความสัมพันธ์" /></div>
-             </div>
-          </div>
+  const handleChangePwd = (e) => {
+    e.preventDefault();
+    if(String(pwdForm.old) !== String(student.password)) return showToast('รหัสผ่านเดิมไม่ถูกต้อง');
+    if(pwdForm.new !== pwdForm.confirm) return showToast('รหัสผ่านใหม่ไม่ตรงกัน');
+    
+    updateStudentInDB({ password: pwdForm.new }, 'เปลี่ยนรหัสผ่านสำเร็จ ข้อมูลอัปเดตแล้ว');
+    setPwdForm({ old: '', new: '', confirm: '' });
+  };
 
-          <div><label className="block text-sm font-bold mb-2">รหัสผ่านใหม่ (สำหรับเข้าสู่ระบบ)</label><input required type="password" value={form.password} onChange={e=>setForm({...form, password: e.target.value})} className={inputClass} /></div>
-          
-          <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-colors flex items-center justify-center text-lg"><Save size={20} className="mr-2"/> บันทึกข้อมูลส่วนตัว</button>
-        </form>
-      </div>
+  const handleSavePhones = (e) => {
+    e.preventDefault();
+    updateStudentInDB({ studentPhone: phoneForm.studentPhone, parentPhone: phoneForm.parentPhone }, 'บันทึกข้อมูลการติดต่อลงระบบสำเร็จ');
+  };
+
+  const inputClass = `w-full rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 font-bold border ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-300'}`;
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6 pb-12">
+       <div className={`rounded-3xl p-8 shadow-sm text-center relative overflow-hidden border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+         <div className="absolute top-0 left-0 w-full h-32 bg-blue-600"></div>
+         <div className={`w-32 h-32 mx-auto rounded-full border-4 shadow-lg relative group overflow-hidden mt-12 flex justify-center items-center z-10 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-white'}`}>
+            {profileImg ? <img src={getValidImgUrl(profileImg)} className="w-full h-full object-cover rounded-full" /> : <User size={48} className="text-slate-400"/>}
+            <div className={`absolute inset-0 bg-black/50 flex items-center justify-center transition-opacity cursor-pointer ${isUploading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+              {isUploading ? <RefreshCw className="text-white animate-spin" size={32} /> : <Camera className="text-white" size={32} />}
+              {!isUploading && <input type="file" accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer"/>}
+            </div>
+         </div>
+         <h3 className="text-2xl font-black mt-4 relative z-10">{student.name}</h3>
+         <p className="text-blue-500 font-bold text-sm relative z-10 mb-2">รหัส {student.id} | ห้อง {student.room} ตอน {student.section || '-'} | เลขที่ {student.number}</p>
+         <p className={`text-xs font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>* ไม่สามารถเปลี่ยนข้อมูลส่วนตัวหลักได้ หากต้องการแก้ไขโปรดติดต่อคุณครู</p>
+         
+         <div className="mt-6 flex justify-center gap-3">
+           <label className={`cursor-pointer inline-flex items-center px-6 py-2.5 text-white font-bold rounded-xl shadow-md transition-colors ${isUploading ? 'bg-slate-400 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-900'}`}>
+             {isUploading ? <RefreshCw size={18} className="mr-2 animate-spin" /> : <Camera size={18} className="mr-2" />}
+             {isUploading ? 'กำลังอัปโหลด...' : 'เปลี่ยนรูปประจำตัว'}
+             {!isUploading && <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />}
+           </label>
+         </div>
+       </div>
+
+       <form onSubmit={handleSavePhones} className={`rounded-3xl p-8 shadow-sm space-y-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+         <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><User className="mr-3 text-blue-500"/> ข้อมูลการติดต่อ (เพิ่มเติม)</h3>
+         <div><label className="block text-sm font-bold mb-2">เบอร์โทรศัพท์นักเรียน</label><input type="tel" value={phoneForm.studentPhone} onChange={e=>setPhoneForm({...phoneForm, studentPhone: e.target.value})} className={inputClass} placeholder="เช่น 08X-XXX-XXXX" /></div>
+         <div><label className="block text-sm font-bold mb-2">เบอร์โทรศัพท์ผู้ปกครอง</label><input type="tel" value={phoneForm.parentPhone} onChange={e=>setPhoneForm({...phoneForm, parentPhone: e.target.value})} className={inputClass} placeholder="เช่น 08X-XXX-XXXX" /></div>
+         <div className="pt-2"><button type="submit" disabled={isSaving} className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md transition-all flex justify-center items-center">{isSaving ? <RefreshCw size={20} className="mr-2 animate-spin" /> : ''} บันทึกเบอร์ติดต่อ</button></div>
+       </form>
+
+       <form onSubmit={handleChangePwd} className={`rounded-3xl p-8 shadow-sm space-y-5 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+         <h3 className="text-xl font-black mb-6 flex items-center border-b pb-4"><Settings className="mr-3 text-blue-500"/> เปลี่ยนรหัสผ่าน</h3>
+         <div><label className="block text-sm font-bold mb-2">รหัสผ่านเดิม</label><input required type="password" value={pwdForm.old} onChange={e=>setPwdForm({...pwdForm, old: e.target.value})} className={inputClass} /></div>
+         <div><label className="block text-sm font-bold mb-2">รหัสผ่านใหม่</label><input required type="password" value={pwdForm.new} onChange={e=>setPwdForm({...pwdForm, new: e.target.value})} className={inputClass} /></div>
+         <div><label className="block text-sm font-bold mb-2">ยืนยันรหัสผ่านใหม่</label><input required type="password" value={pwdForm.confirm} onChange={e=>setPwdForm({...pwdForm, confirm: e.target.value})} className={inputClass} /></div>
+         <div className="pt-2"><button type="submit" disabled={isSaving} className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-all flex justify-center items-center">{isSaving ? <RefreshCw size={20} className="mr-2 animate-spin" /> : ''} อัปเดตรหัสผ่าน</button></div>
+       </form>
     </div>
   );
 }
