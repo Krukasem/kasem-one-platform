@@ -2290,7 +2290,7 @@ function StudentAnnouncements({ announcements, theme, student }) {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <h2 className="text-2xl font-black border-l-4 border-blue-500 pl-4 mb-6">ประกาศข่าวสาร</h2>
+      <h2 className="text-2xl font-black border-l-4 border-blue-50 pl-4 mb-6">ประกาศข่าวสาร</h2>
       <div className="space-y-5">
         {myAnnouncements.map(ann => (
           <div key={ann.id} className={`p-6 md:p-8 rounded-3xl shadow-sm border border-l-8 border-l-blue-500 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -2381,9 +2381,16 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
           reader.readAsDataURL(file);
         });
         
-        // แก้ไขชื่อไฟล์ใหม่: รหัส_ชื่อนักเรียน_ชื่อไฟล์
-        const cleanName = student.name.replace(/\s+/g, '_'); // เปลี่ยนช่องว่างในชื่อเป็น _ ป้องกันชื่อไฟล์เว้นวรรค
-        const newFileName = `${student.id}_${cleanName}_${file.name}`;
+        // 1. ดึงข้อมูลวิชามาทำชื่อโฟลเดอร์ให้มีรหัสวิชานำหน้า
+        const subObjForUpload = subjects.find(s => s.id === selectedAsg.subjectId);
+        const subCode = subObjForUpload ? subObjForUpload.code : 'Unknown';
+        const folderName = `[${subCode}] ${selectedAsg.title}`;
+
+        // 2. ปรับชื่อไฟล์ใหม่ให้เรียงตามห้องและเลขที่
+        const cleanName = student.name.replace(/\s+/g, '_'); 
+        const safeRoom = String(student.room || '').replace(/\//g, '-'); 
+        const safeNumber = student.number ? String(student.number).padStart(2, '0') : '00'; 
+        const newFileName = `ห้อง${safeRoom}_เลขที่${safeNumber}_${student.id}_${cleanName}_${file.name}`;
 
         const payload = { 
           action: 'uploadFile', 
@@ -2391,7 +2398,7 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
           filename: newFileName, 
           mimeType: file.type, 
           fileData: base64,
-          subFolderName: selectedAsg.title // ส่งชื่อโฟลเดอร์ให้ Google Apps Script สร้างให้
+          subFolderName: folderName // ใช้ชื่อโฟลเดอร์แบบใหม่
         };
         
         const res = await fetch(dbUrl, { method: 'POST', body: JSON.stringify(payload) });
