@@ -451,6 +451,7 @@ function Sidebar({ currentUser, activeTab, setActiveTab, onLogout, theme, isOpen
     { id: 'grading', icon: <CheckSquare size={18} />, label: 'ตรวจงาน (คะแนนเก็บ)' },
     { id: 'exams', icon: <FileText size={18} />, label: 'กรอกคะแนนสอบ' },
     { id: 'summary', icon: <BarChart2 size={18} />, label: 'สรุปผลคะแนน' },
+    { id: 'missing-work', icon: <AlertCircle size={18} />, label: 'สรุปงานค้างส่ง' },
     { id: 'profile', icon: <Settings size={18} />, label: 'ตั้งค่าระบบ & DB' },
   ];
 
@@ -548,6 +549,7 @@ function TeacherView(props) {
     case 'grading': return <TeacherGrading {...props} />;
     case 'exams': return <TeacherExams {...props} />;
     case 'summary': return <TeacherSummary {...props} />;
+    case 'missing-work': return <TeacherMissingWork {...props} />;
     case 'profile': return <TeacherProfile {...props} />;
     default: return <TeacherDashboard {...props} />;
   }
@@ -2105,6 +2107,117 @@ function TeacherSummary({ subjects, students, assignments, submissions, exams, b
                   <td className="p-4 text-center font-black text-lg"><span className={row.behaviorTotal > 0 ? 'text-green-500' : row.behaviorTotal < 0 ? 'text-red-500' : 'text-slate-500'}>{row.behaviorTotal > 0 ? `+${row.behaviorTotal}` : row.behaviorTotal}</span></td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TeacherMissingWork({ subjects, assignments, students, enrollments, submissions, theme }) {
+  const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
+  const [filterRoom, setFilterRoom] = useState('all');
+  const [filterSection, setFilterSection] = useState('all');
+  const isDark = theme === 'dark';
+
+  const enrolledIds = enrollments.filter(e => e.subjectId === filterSub).map(e => String(e.studentId));
+  const enrolledSts = students.filter(s => enrolledIds.includes(String(s.id)));
+  const dynamicRooms = [...new Set(enrolledSts.map(s => s.room))].filter(Boolean).sort();
+  const dynamicSections = [...new Set(enrolledSts.filter(s => filterRoom === 'all' || String(s.room) === String(filterRoom)).map(s => String(s.section || '')))].filter(s => s && s !== '-').sort();
+  
+  const targetStudents = enrolledSts.filter(s => 
+    (filterRoom === 'all' || String(s.room) === String(filterRoom)) &&
+    (filterSection === 'all' || String(s.section || '') === String(filterSection))
+  );
+
+  const targetAsgs = assignments.filter(a => a.subjectId === filterSub);
+
+  const checkIsAsgForStudent = (asg, student) => {
+    if (!asg.targetRooms || asg.targetRooms.length === 0) return true;
+    return asg.targetRooms.includes(String(student.room));
+  };
+
+  const missingWorkData = targetStudents.map(stu => {
+    const missingAsgs = targetAsgs.filter(asg => {
+      // ตรวจสอบว่างานนี้มอบหมายให้นักเรียนคนนี้หรือไม่
+      if (!checkIsAsgForStudent(asg, stu)) return false;
+      // ตรวจสอบว่ามีการส่งงานหรือไม่
+      const sub = submissions.find(s => s.assignmentId === asg.id && String(s.studentId) === String(stu.id));
+      return !sub; // ถ้าหาไม่เจอ แปลว่าค้างส่ง (ไม่ได้ส่ง)
+    });
+    return { ...stu, missingAsgs };
+  });
+
+  const selectClass = `font-bold rounded-xl p-3 outline-none border focus:ring-2 focus:ring-blue-500 flex-1 md:flex-none min-w-[150px] ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`;
+
+  const handleExport = () => {
+    let csv = '\uFEFF'; 
+    csv += `สรุปงานค้างส่ง - วิชา ${subjects.find(s => s.id === filterSub)?.name || ''}\n`;
+    csv += 'ห้อง,ตอน,เลขที่,รหัส,ชื่อ-สกุล,จำนวนงานค้าง,รายชื่องานที่ค้าง\n';
+
+    missingWorkData.forEach(row => {
+      const missingTitles = row.missingAsgs.map(a => a.title).join(' / ');
+      csv += `${row.room},${row.section || '-'},${row.number},="${row.id}","${row.name}",${row.missingAsgs.length},"${missingTitles}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = url; link.download = `MissingWork_Sub_${filterSub}_Room_${filterRoom}.csv`; link.click();
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-6 flex flex-col h-[calc(100vh-100px)]">
+      <h2 className="text-xl font-black flex items-center border-l-4 border-blue-600 pl-3 shrink-0"><AlertCircle className="mr-2 text-blue-500"/> สรุปงานค้างส่งของนักเรียน</h2>
+      
+      <div className={`p-5 rounded-3xl flex flex-wrap gap-4 items-center justify-between shadow-sm shrink-0 border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+         <div className="flex flex-wrap gap-4 w-full md:w-auto">
+           <select value={filterSub} onChange={e => {setFilterSub(e.target.value); setFilterRoom('all'); setFilterSection('all');}} className={selectClass}><option value="">-- เลือกวิชา --</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+           <select value={filterRoom} onChange={e => {setFilterRoom(e.target.value); setFilterSection('all');}} className={selectClass}><option value="all">ทุกห้อง</option>{dynamicRooms.map(r => <option key={r} value={r}>ห้อง {r}</option>)}</select>
+           <select value={filterSection} onChange={e => setFilterSection(e.target.value)} className={selectClass}><option value="all">ทุกตอน</option>{dynamicSections.map(s => <option key={s} value={s}>ตอน {s}</option>)}</select>
+         </div>
+         <button onClick={handleExport} className="flex items-center px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-md w-full md:w-auto justify-center transition-colors"><DownloadCloud size={18} className="mr-2" /> ส่งออก Excel</button>
+      </div>
+
+      <div className={`border rounded-3xl overflow-hidden flex-1 flex flex-col shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className="overflow-auto custom-scrollbar flex-1">
+          <table className="w-full text-left text-sm min-w-max border-collapse">
+            <thead className={`font-bold sticky top-0 z-10 border-b shadow-sm ${isDark ? 'bg-slate-900 text-slate-400 border-slate-700' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+              <tr>
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ห้อง</th>
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>เลขที่</th>
+                <th className={`p-4 border-r ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รหัส / ชื่อ-สกุล</th>
+                <th className={`p-4 border-r text-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>ค้างส่ง (ชิ้น)</th>
+                <th className={`p-4 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>รายชื่องานที่ค้างส่ง</th>
+              </tr>
+            </thead>
+            <tbody className={`divide-y ${isDark ? 'divide-slate-700/50' : 'divide-slate-100'}`}>
+              {missingWorkData.map((row) => (
+                <tr key={row.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-red-50/40'}`}>
+                  <td className={`p-4 text-center font-bold border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.room} {row.section && row.section !== '-' ? `(${row.section})` : ''}</td>
+                  <td className={`p-4 text-center border-r ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>{row.number}</td>
+                  <td className={`p-4 font-bold border-r whitespace-nowrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}><span className="text-blue-500 mr-2 font-mono">{row.id}</span>{row.name}</td>
+                  <td className={`p-4 text-center font-black border-r ${row.missingAsgs.length > 0 ? 'text-red-500' : 'text-emerald-500'} ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                    {row.missingAsgs.length === 0 ? 'ครบ' : row.missingAsgs.length}
+                  </td>
+                  <td className={`p-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                    {row.missingAsgs.length === 0 ? (
+                      <span className="text-emerald-500 font-bold flex items-center"><CheckSquare size={16} className="mr-2"/>ส่งงานครบแล้ว</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {row.missingAsgs.map(a => (
+                          <span key={a.id} className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${isDark ? 'bg-red-900/20 text-red-400 border-red-900/50' : 'bg-red-50 text-red-600 border-red-100'}`}>
+                            {a.title}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {missingWorkData.length === 0 && (
+                <tr><td colSpan="5" className="p-8 text-center font-bold text-slate-500">ไม่พบข้อมูลนักเรียนในวิชา/ห้องที่เลือก</td></tr>
+              )}
             </tbody>
           </table>
         </div>
