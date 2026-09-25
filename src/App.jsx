@@ -1709,7 +1709,7 @@ function TeacherAssignments({ assignments, saveState, subjects, students, enroll
   );
 }
 
-function TeacherGrading({ subjects, assignments, students, submissions, setSubmissions, showToast, theme, dbUrl }) {
+function TeacherGrading({ subjects, assignments, students, submissions, setSubmissions, showToast, theme, dbUrl, saveState }) {
   const [filterSub, setFilterSub] = useState(subjects[0]?.id || '');
   const [filterAsg, setFilterAsg] = useState('all');
   const [filterRoom, setFilterRoom] = useState('all');
@@ -1758,6 +1758,7 @@ function TeacherGrading({ subjects, assignments, students, submissions, setSubmi
        if (dbUrl) {
          await fetch(dbUrl, {
            method: 'POST',
+           headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // เพิ่ม Header ป้องกันการถูกบล็อก
            body: JSON.stringify({
              action: 'updateRecord',
              sheetName: 'submissions',
@@ -1772,6 +1773,7 @@ function TeacherGrading({ subjects, assignments, students, submissions, setSubmi
           s.id === selectedSubm.id ? { ...s, status: 'graded', rawScore, penalty, score: finalScore } : s
        );
        setSubmissions(updatedSubmissions);
+       if (saveState) saveState({ submissions: updatedSubmissions }, true); // บันทึกลง Local Cache ด้วย
        showToast('บันทึกคะแนนสำเร็จ ซิงค์ข้อมูลลงระบบแล้ว');
      } catch (e) {
        showToast('บันทึกไม่สำเร็จ ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
@@ -2462,7 +2464,7 @@ function StudentMaterials({ subjects, materials, theme }) {
   );
 }
 
-function StudentAssignments({ student, assignments, submissions, setSubmissions, subjects, showToast, dbUrl, theme }) {
+function StudentAssignments({ student, assignments, submissions, setSubmissions, subjects, showToast, dbUrl, theme, saveState }) {
   const [selectedAsg, setSelectedAsg] = useState(null);
   const [file, setFile] = useState(null);
   const [linkUrl, setLinkUrl] = useState('');
@@ -2545,14 +2547,23 @@ function StudentAssignments({ student, assignments, submissions, setSubmissions,
 
       if (dbUrl) {
         if (existingSub) {
-           await fetch(dbUrl, { method: 'POST', body: JSON.stringify({ action: 'updateRecord', sheetName: 'submissions', keyField: 'id', keyValue: subId, updateData: newSub }) });
+           await fetch(dbUrl, { 
+             method: 'POST', 
+             headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // เพิ่ม Header
+             body: JSON.stringify({ action: 'updateRecord', sheetName: 'submissions', keyField: 'id', keyValue: subId, updateData: newSub }) 
+           });
         } else {
-           await fetch(dbUrl, { method: 'POST', body: JSON.stringify({ action: 'addRecord', sheetName: 'submissions', data: newSub }) });
+           await fetch(dbUrl, { 
+             method: 'POST', 
+             headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // เพิ่ม Header
+             body: JSON.stringify({ action: 'addRecord', sheetName: 'submissions', data: newSub }) 
+           });
         }
       }
 
       const updatedSubs = existingSub ? submissions.map(s => s.id === subId ? newSub : s) : [...submissions, newSub];
       setSubmissions(updatedSubs);
+      if (saveState) saveState({ submissions: updatedSubs }, true); // บันทึกลง Local Cache
       
       showToast('ส่งงานเรียบร้อย บันทึกข้อมูลลงระบบสำเร็จ');
       setSelectedAsg(null); setFile(null); setLinkUrl('');
